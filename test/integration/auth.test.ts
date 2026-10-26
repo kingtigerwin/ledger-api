@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAuthHandler } from "../../src/auth/handler";
+import { hashPassword } from "../../src/auth/password";
+import { verifyAccessToken } from "../../src/auth/tokens";
+import { createUsersStore } from "../../src/auth/users-store";
 import { createUsersTable, deleteTable } from "../support/dynamo";
 import { call } from "../support/http";
 
@@ -8,6 +11,17 @@ const LOGIN = "POST /api/v1/auth/login";
 
 let tableName: string;
 let handler: ReturnType<typeof createAuthHandler>;
+
+// Stands in for admin approval until the enable endpoint exists (Stage 3).
+async function createActiveUser(username: string, password: string) {
+  return createUsersStore(tableName).create({
+    username,
+    passwordHash: await hashPassword(password),
+    role: "customer",
+    status: "active",
+    now: new Date(),
+  });
+}
 
 beforeAll(async () => {
   tableName = await createUsersTable();
@@ -83,6 +97,23 @@ describe("POST /auth/login", () => {
 
       expect(res.status).toBe(401);
       expect(res.body.error).toEqual({ code: "invalid_credentials", message: "Invalid username or password" });
+    });
+  });
+
+  describe("given an active user with the correct password", () => {
+    it("returns an access token for that customer", async () => {
+      const user = await createActiveUser("frank", "pw");
+
+      const res = await call(handler, LOGIN, { username: "Frank", password: "pw" });
+
+      expect(res.status).toBe(200);
+      const claims = await verifyAccessToken(res.body.accessToken, "test-secret", new Date());
+      expect(claims.sub).toBe(user.id);
+      expect(claims.role).toBe("customer");
+      expect(claims.scope.split(" ")).toEqual(
+        expect.arrayContaining(["members:read", "members:write", "transactions:read", "transactions:write"]),
+      );
+      expect(res.body.expiresIn).toBe(900);
     });
   });
 });
