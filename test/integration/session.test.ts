@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAuthHandler } from "../../src/auth/handler";
 import { verifyAccessToken } from "../../src/auth/tokens";
+import { createUsersStore } from "../../src/auth/users-store";
 import { createUsersTable, deleteTable } from "../support/dynamo";
 import { call, cookiePair } from "../support/http";
 import { createUserWithStatus } from "../support/users";
@@ -106,6 +107,19 @@ describe("POST /auth/refresh", () => {
 
       now = new Date("2026-10-08T09:00:01Z");
       const res = await call(clocked, REFRESH, { refreshToken: login.body.refreshToken });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe("invalid_refresh_token");
+    });
+  });
+
+  describe("given a user who was disabled after logging in", () => {
+    it("refuses to refresh", async () => {
+      const user = await createUserWithStatus(tableName, "olga", "pw", "active");
+      const login = await call(handler, LOGIN, { username: "olga", password: "pw", refreshTokenIn: "body" });
+      await createUsersStore(tableName).setStatus(user.id, "disabled");
+
+      const res = await call(handler, REFRESH, { refreshToken: login.body.refreshToken });
 
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe("invalid_refresh_token");

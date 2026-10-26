@@ -132,6 +132,19 @@ export function createUsersStore(tableName: string) {
       return { id, username, role, status, createdAt };
     },
 
+    async setStatus(userId: string, status: UserStatus): Promise<void> {
+      await ddb.send(
+        new UpdateCommand({
+          TableName: tableName,
+          Key: profileKey(userId),
+          UpdateExpression: "SET #status = :status",
+          ConditionExpression: "attribute_exists(pk)",
+          ExpressionAttributeNames: { "#status": "status" },
+          ExpressionAttributeValues: { ":status": status },
+        }),
+      );
+    },
+
     async saveRefreshToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
       await ddb.send(new PutCommand({ TableName: tableName, Item: refreshTokenItem(userId, tokenHash, expiresAt) }));
     },
