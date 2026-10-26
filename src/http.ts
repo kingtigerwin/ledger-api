@@ -31,6 +31,15 @@ export function authContext(event: APIGatewayProxyEventV2): AuthContext {
   return ctx;
 }
 
+/** Admin routes need both the admin role and the scope for the kind of access. */
+export function requireAdmin(event: APIGatewayProxyEventV2, scope: "admin:read" | "admin:write"): AuthContext {
+  const ctx = authContext(event);
+  if (ctx.role !== "admin" || !ctx.scope.split(" ").includes(scope)) {
+    throw new ApiError(403, "forbidden", "Admins only");
+  }
+  return ctx;
+}
+
 export function json(statusCode: number, body: unknown, cookies?: string[]): APIGatewayProxyStructuredResultV2 {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body), cookies };
 }

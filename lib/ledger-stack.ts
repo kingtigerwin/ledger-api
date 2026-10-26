@@ -12,6 +12,7 @@ import { Provider } from "aws-cdk-lib/custom-resources";
 import type { Construct } from "constructs";
 import { usersTableKeys } from "../src/auth/users-table";
 import { ADMIN_PASSWORD_PARAM, SIGNING_SECRET_PARAM } from "../src/config";
+import { dataTableKeys } from "../src/data/data-table";
 // Unauthenticated routes that anyone on the internet can call, so they get tighter throttling.
 const PUBLIC_AUTH_ROUTES = ["register", "login", "refresh", "logout"].map((name) => `/api/v1/auth/${name}`);
 
@@ -24,6 +25,17 @@ export class LedgerStack extends Stack {
       sortKey: { name: usersTableKeys.sortKey, type: AttributeType.STRING },
       billing: Billing.onDemand(),
       timeToLiveAttribute: "ttl",
+    });
+
+    const dataTable = new TableV2(this, "DataTable", {
+      partitionKey: { name: dataTableKeys.partitionKey, type: AttributeType.STRING },
+      sortKey: { name: dataTableKeys.sortKey, type: AttributeType.STRING },
+      billing: Billing.onDemand(),
+      globalSecondaryIndexes: dataTableKeys.indexes.map((index) => ({
+        indexName: index.name,
+        partitionKey: { name: index.partitionKey, type: AttributeType.STRING },
+        sortKey: { name: index.sortKey, type: AttributeType.STRING },
+      })),
     });
 
     const parameterArn = (name: string) =>
@@ -85,12 +97,28 @@ export class LedgerStack extends Stack {
     });
     usersTable.grantReadWriteData(adminFunction);
 
+    const dataFunction = makeFunction("Data", "data/lambda.ts", {
+      memorySize: 256,
+      environment: { DATA_TABLE: dataTable.tableName },
+    });
+    dataTable.grantReadWriteData(dataFunction);
+    canReadSigningSecret(dataFunction);
+
     const api = new HttpApi(this, "Api", { createDefaultStage: false });
     const auth = new HttpLambdaIntegration("AuthIntegration", authFunction);
     const publicRoutes = PUBLIC_AUTH_ROUTES.flatMap((routePath) =>
       api.addRoutes({ path: routePath, methods: [HttpMethod.POST], integration: auth }),
     );
     api.addRoutes({ path: "/api/v1/auth/me", methods: [HttpMethod.GET], integration: auth, authorizer });
+    const data = new HttpLambdaIntegration("DataIntegration", dataFunction);
+    const dataRoutes: [string, HttpMethod[]][] = [
+      ["/api/v1/members", [HttpMethod.POST, HttpMethod.GET]],
+      ["/api/v1/members/{id}", [HttpMethod.PATCH, HttpMethod.DELETE]],
+      ["/api/v1/admin/users/{id}/members", [HttpMethod.GET]],
+    ];
+    for (const [routePath, methods] of dataRoutes) {
+      api.addRoutes({ path: routePath, methods, integration: data, authorizer });
+    }
     const admin = new HttpLambdaIntegration("AdminIntegration", adminFunction);
     api.addRoutes({ path: "/api/v1/admin/users", methods: [HttpMethod.GET], integration: admin, authorizer });
     for (const action of ["enable", "disable"]) {
