@@ -40,7 +40,7 @@ function withRefreshToken(body: Record<string, unknown>, refreshToken: string, d
 const invalidRefreshToken = () => new ApiError(401, "invalid_refresh_token", "Log in again");
 
 /** Finds the refresh token in the cookie (browsers) or the JSON body (other clients). */
-function readRefreshToken(event: APIGatewayProxyEventV2): { token: string; deliverIn: Delivery } {
+function readRefreshToken(event: APIGatewayProxyEventV2): { token: string; deliverIn: Delivery } | undefined {
   const cookie = event.cookies?.find((c) => c.startsWith("refreshToken="));
   if (cookie) return { token: cookie.slice("refreshToken=".length), deliverIn: "cookie" };
   try {
@@ -49,7 +49,7 @@ function readRefreshToken(event: APIGatewayProxyEventV2): { token: string; deliv
   } catch {
     // An unreadable body is the same as a missing token.
   }
-  throw invalidRefreshToken();
+  return undefined;
 }
 
 export function createAuthHandler(deps: AuthDeps) {
@@ -103,7 +103,9 @@ export function createAuthHandler(deps: AuthDeps) {
       }
       case "POST /api/v1/auth/refresh": {
         const now = deps.now();
-        const { token, deliverIn } = readRefreshToken(event);
+        const presented = readRefreshToken(event);
+        if (!presented) throw invalidRefreshToken();
+        const { token, deliverIn } = presented;
         const [userId] = token.split(".");
         const user = userId ? await users.getById(userId) : undefined;
         if (user?.status !== "active") throw invalidRefreshToken();
@@ -120,15 +122,9 @@ export function createAuthHandler(deps: AuthDeps) {
       }
       case "POST /api/v1/auth/logout": {
         // Logging out twice, or without a token, is still a successful logout.
-        const found = (() => {
-          try {
-            return readRefreshToken(event);
-          } catch {
-            return undefined;
-          }
-        })();
-        const userId = found?.token.split(".")[0];
-        if (found && userId) await users.deleteRefreshToken(userId, hashRefreshToken(found.token));
+        const presented = readRefreshToken(event);
+        const userId = presented?.token.split(".")[0];
+        if (presented && userId) await users.deleteRefreshToken(userId, hashRefreshToken(presented.token));
         return noContent([clearRefreshCookie()]);
       }
       case "GET /api/v1/auth/me": {

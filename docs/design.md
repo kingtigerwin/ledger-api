@@ -16,9 +16,13 @@ A public API where household customers record their spending. It's a learning an
 - Passwords are hashed with scrypt (`node:crypto`), stored as `scrypt$N$r$p$salt$hash` and compared with `timingSafeEqual`.
 - Input limits: username and password must be non-empty, at most 64 and 1,024 characters respectively. Usernames are unique and stored lowercase. No other password policy.
 - `POST /api/v1/auth/login` returns a 15-minute HS256 access token with claims `sub`, `role` (`admin` | `customer`) and `scope`. Failed logins always return the same "invalid username or password" error.
-- Refresh tokens last 7 days, are stored in DynamoDB and are replaced on every use. They are delivered as an `HttpOnly; Secure; SameSite=Strict; Path=/api/auth` cookie, and also accepted in the request body for non-browser clients (a future agent).
-- `POST /api/v1/auth/refresh` and `POST /api/v1/auth/logout`.
-- A custom Lambda authorizer validates the access token on every other route, with its result cached.
+- Refresh tokens last 7 days and are replaced on every use. Only their SHA-256 hash is stored, under `USER#<id>` / `REFRESH#<hash>`, with a DynamoDB TTL for cleanup (expiry is also checked in code, since TTL deletion can lag).
+  - Login delivers the refresh token as an `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth` cookie by default. A non-browser client (a future agent) sends `"refreshTokenIn": "body"` to get it in the JSON body instead, and then sends it back in the body.
+  - `POST /api/v1/auth/refresh` answers in the same channel the token arrived in.
+  - Replaying a refresh token that was already replaced revokes all of that user's refresh tokens, since it was probably copied.
+- `POST /api/v1/auth/logout` deletes the presented refresh token and clears the cookie; it succeeds even without a token.
+- `GET /api/v1/auth/me` returns the signed-in user.
+- A custom Lambda authorizer (simple responses) validates the bearer access token on every other route and passes `userId`, `role` and `scope` to it. Results are cached for 60 seconds, so an expired token works for at most a minute longer.
 - Abuse protection: API Gateway throttling on the stage, tighter on `/auth/*`; 5 failed logins lock a username for 15 minutes.
 
 ## Roles
@@ -73,7 +77,7 @@ All under `/api/v1`.
 
 | Area | Endpoints |
 |---|---|
-| Auth | `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout` |
+| Auth | `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` |
 | Members | `POST /members`, `GET /members`, `PATCH /members/{id}`, `DELETE /members/{id}` |
 | Transactions | `POST /transactions`, `GET /transactions/{id}`, `GET /transactions` (`cursor`, `limit`, `from`, `to`, `memberId`, `category`), `GET /transactions/summary?month=YYYY-MM`, `PATCH /transactions/{id}`, `DELETE /transactions/{id}` |
 | Admin | `GET /admin/users?status=pending`, `POST /admin/users/{id}/enable`, `POST /admin/users/{id}/disable`, `GET /admin/users/{id}/members`, `GET /admin/users/{id}/transactions` |
