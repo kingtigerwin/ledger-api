@@ -2,7 +2,8 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { z } from "zod";
 import { ApiError, authContext, json, noContent, parseBody, requireAdmin, withErrors } from "../http";
 import { createMembersStore, MemberNameTakenError, MemberNotFoundError } from "./members-store";
-import { createTransactionSchema, type Transaction, updateTransactionSchema } from "./transaction-schema";
+import { decodeCursor, encodeCursor, InvalidCursorError } from "./cursor";
+import { createTransactionSchema, listQuerySchema, type Transaction, updateTransactionSchema } from "./transaction-schema";
 import {
   createTransactionsStore,
   TransactionExistsError,
@@ -43,6 +44,14 @@ async function mapMemberErrors<T>(write: () => Promise<T>): Promise<T> {
   }
 }
 
+function parseQuery<T extends z.ZodType>(event: APIGatewayProxyEventV2, schema: T): z.infer<T> {
+  const result = schema.safeParse(event.queryStringParameters ?? {});
+  if (!result.success) throw new ApiError(400, "validation_failed", "Query is invalid", result.error.issues);
+  return result.data;
+}
+
+const invalidCursor = () => new ApiError(400, "invalid_cursor", "The cursor is invalid; start from the first page");
+
 export function createDataHandler(deps: DataDeps) {
   const members = createMembersStore(deps.tableName);
   const transactions = createTransactionsStore(deps.tableName);
@@ -52,6 +61,31 @@ export function createDataHandler(deps: DataDeps) {
     const member = await members.get(userId, memberId);
     if (!member) throw new ApiError(422, "member_not_found", "That member isn't in this household");
     return member;
+  };
+
+  /** One page of a household's transactions, with member names and a signed cursor for the next page. */
+  const listPage = async (userId: string, event: APIGatewayProxyEventV2) => {
+    const { cursor, ...query } = parseQuery(event, listQuerySchema);
+    let startKey: Record<string, unknown> | undefined;
+    try {
+      startKey = cursor ? decodeCursor(cursor, deps.cursorSecret) : undefined;
+    } catch (err) {
+      if (err instanceof InvalidCursorError) throw invalidCursor();
+      throw err;
+    }
+    let page;
+    try {
+      page = await transactions.list(userId, query, startKey);
+    } catch (err) {
+      // A genuine cursor from a different filter has keys this query can't start from.
+      if (startKey && err instanceof Error && err.name === "ValidationException") throw invalidCursor();
+      throw err;
+    }
+    const names = new Map((await members.list(userId)).map((m) => [m.id, m.name]));
+    return {
+      items: page.items.map((t) => ({ ...t, memberName: names.get(t.memberId) })),
+      nextCursor: page.lastKey ? encodeCursor(page.lastKey, deps.cursorSecret) : null,
+    };
   };
 
   /** Adds the member's current name, so renaming a member never touches transactions. */
@@ -133,6 +167,10 @@ export function createDataHandler(deps: DataDeps) {
           throw err;
         }
         return noContent();
+      }
+      case "GET /api/v1/transactions": {
+        const userId = requireScope(event, "transactions:read");
+        return json(200, await listPage(userId, event));
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);

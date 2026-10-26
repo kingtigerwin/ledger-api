@@ -1,6 +1,6 @@
-import { GetCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../db-client";
-import type { CreateTransactionInput, Transaction, TransactionFields } from "./transaction-schema";
+import type { CreateTransactionInput, ListQuery, Transaction, TransactionFields } from "./transaction-schema";
 
 /** The ID was already used: the request is a retry (or a client bug), not a new transaction. */
 export class TransactionExistsError extends Error {}
@@ -31,6 +31,12 @@ const fromItem = (item: Record<string, unknown>): Transaction => {
     item as unknown as Transaction;
   return { id, memberId, date, merchant, category, item: what, amountCents, currency, note, version, createdAt, updatedAt };
 };
+
+// Sort keys are `<date>#<id>`, so a date range is a key range: from the start of `from`
+// to the end of `to` (the high character sorts after any ID).
+const EARLIEST = "0000-01-01";
+const LATEST = "9999-12-31";
+const rangeEnd = (date: string) => `${date}#\uffff`;
 
 export function createTransactionsStore(tableName: string) {
   return {
@@ -117,6 +123,44 @@ export function createTransactionsStore(tableName: string) {
           ],
         }),
       );
+    },
+
+    /**
+     * Newest first. Picks the access path the filters allow: the by-member index (with category
+     * as a filter if given), the by-category index, or the main key. Dates are always a key range.
+     */
+    async list(
+      userId: string,
+      query: Omit<ListQuery, "cursor" | "limit"> & { limit: number },
+      startKey?: Record<string, unknown>,
+    ): Promise<{ items: Transaction[]; lastKey?: Record<string, unknown> }> {
+      const from = query.from ?? EARLIEST;
+      const to = rangeEnd(query.to ?? LATEST);
+      const path = query.memberId
+        ? { IndexName: "byMember", pk: "gsi1pk", pkValue: `${userPk(userId)}#MEMBER#${query.memberId}`, sk: "gsi1sk", prefix: "" }
+        : query.category
+          ? { IndexName: "byCategory", pk: "gsi2pk", pkValue: `${userPk(userId)}#CATEGORY#${query.category}`, sk: "gsi2sk", prefix: "" }
+          : { IndexName: undefined, pk: "pk", pkValue: userPk(userId), sk: "sk", prefix: "TXN#" };
+      const filterByCategory = Boolean(query.memberId && query.category);
+      const res = await ddb.send(
+        new QueryCommand({
+          TableName: tableName,
+          IndexName: path.IndexName,
+          KeyConditionExpression: "#pk = :pk AND #sk BETWEEN :from AND :to",
+          FilterExpression: filterByCategory ? "category = :category" : undefined,
+          ExpressionAttributeNames: { "#pk": path.pk, "#sk": path.sk },
+          ExpressionAttributeValues: {
+            ":pk": path.pkValue,
+            ":from": path.prefix + from,
+            ":to": path.prefix + to,
+            ...(filterByCategory ? { ":category": query.category } : {}),
+          },
+          ScanIndexForward: false,
+          Limit: query.limit,
+          ExclusiveStartKey: startKey,
+        }),
+      );
+      return { items: (res.Items ?? []).map(fromItem), lastKey: res.LastEvaluatedKey };
     },
 
     async get(userId: string, id: string): Promise<Transaction | undefined> {

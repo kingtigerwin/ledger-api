@@ -37,6 +37,16 @@ export const updateTransactionSchema = transactionFieldsSchema.partial().extend(
   version: z.number().int().positive(),
 });
 
+export const listQuerySchema = z.object({
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  memberId: z.string().min(1).optional(),
+  category: z.enum(CATEGORIES).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  cursor: z.string().optional(),
+});
+
+export type ListQuery = z.infer<typeof listQuerySchema>;
 export type TransactionFields = z.infer<typeof transactionFieldsSchema>;
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 
