@@ -4,6 +4,10 @@ import { ApiError, authContext, json, noContent, parseBody, requireAdmin, withEr
 import { createMembersStore, MemberNameTakenError, MemberNotFoundError } from "./members-store";
 import { createTransactionSchema, type Transaction } from "./transaction-schema";
 import { createTransactionsStore, TransactionExistsError } from "./transactions-store";
+import { ulidTime } from "./ulid";
+
+// Client clocks drift a little; an ID from further ahead than this would distort the sort order.
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 export interface DataDeps {
   tableName: string;
@@ -37,6 +41,13 @@ async function mapMemberErrors<T>(write: () => Promise<T>): Promise<T> {
 export function createDataHandler(deps: DataDeps) {
   const members = createMembersStore(deps.tableName);
   const transactions = createTransactionsStore(deps.tableName);
+
+  /** A transaction may only point at one of the household's own members. */
+  const requireMember = async (userId: string, memberId: string) => {
+    const member = await members.get(userId, memberId);
+    if (!member) throw new ApiError(422, "member_not_found", "That member isn't in this household");
+    return member;
+  };
 
   /** Adds the member's current name, so renaming a member never touches transactions. */
   const withMemberName = async (userId: string, t: Transaction) => ({
@@ -72,8 +83,13 @@ export function createDataHandler(deps: DataDeps) {
       case "POST /api/v1/transactions": {
         const userId = requireScope(event, "transactions:write");
         const input = parseBody(event, createTransactionSchema);
+        const now = deps.now();
+        if (ulidTime(input.id).getTime() > now.getTime() + MAX_CLOCK_SKEW_MS) {
+          throw new ApiError(400, "invalid_id", "The id's timestamp is in the future");
+        }
+        await requireMember(userId, input.memberId);
         try {
-          return json(201, await withMemberName(userId, await transactions.create(userId, input, deps.now())));
+          return json(201, await withMemberName(userId, await transactions.create(userId, input, now)));
         } catch (err) {
           if (!(err instanceof TransactionExistsError)) throw err;
           // A retry: answer with what was stored the first time.
