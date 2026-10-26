@@ -2,6 +2,8 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { z } from "zod";
 import { ApiError, authContext, json, noContent, parseBody, requireAdmin, withErrors } from "../http";
 import { createMembersStore, MemberNameTakenError, MemberNotFoundError } from "./members-store";
+import { createTransactionSchema, type Transaction } from "./transaction-schema";
+import { createTransactionsStore } from "./transactions-store";
 
 export interface DataDeps {
   tableName: string;
@@ -34,6 +36,13 @@ async function mapMemberErrors<T>(write: () => Promise<T>): Promise<T> {
 
 export function createDataHandler(deps: DataDeps) {
   const members = createMembersStore(deps.tableName);
+  const transactions = createTransactionsStore(deps.tableName);
+
+  /** Adds the member's current name, so renaming a member never touches transactions. */
+  const withMemberName = async (userId: string, t: Transaction) => ({
+    ...t,
+    memberName: (await members.get(userId, t.memberId))?.name,
+  });
 
   return withErrors(async (event) => {
     switch (event.routeKey) {
@@ -59,6 +68,17 @@ export function createDataHandler(deps: DataDeps) {
       case "GET /api/v1/admin/users/{id}/members": {
         requireAdmin(event, "admin:read");
         return json(200, { items: await members.list(event.pathParameters?.id ?? ""), nextCursor: null });
+      }
+      case "POST /api/v1/transactions": {
+        const userId = requireScope(event, "transactions:write");
+        const input = parseBody(event, createTransactionSchema);
+        return json(201, await withMemberName(userId, await transactions.create(userId, input, deps.now())));
+      }
+      case "GET /api/v1/transactions/{id}": {
+        const userId = requireScope(event, "transactions:read");
+        const transaction = await transactions.get(userId, event.pathParameters?.id ?? "");
+        if (!transaction) throw new ApiError(404, "transaction_not_found", "No such transaction");
+        return json(200, await withMemberName(userId, transaction));
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);
