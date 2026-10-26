@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAuthHandler } from "../../src/auth/handler";
+import { verifyAccessToken } from "../../src/auth/tokens";
 import { createUsersTable, deleteTable } from "../support/dynamo";
-import { call } from "../support/http";
+import { call, cookiePair } from "../support/http";
 import { createUserWithStatus } from "../support/users";
 
 const LOGIN = "POST /api/v1/auth/login";
+const REFRESH = "POST /api/v1/auth/refresh";
 
 let tableName: string;
 let handler: ReturnType<typeof createAuthHandler>;
@@ -46,6 +48,22 @@ describe("POST /auth/login", () => {
       expect(res.status).toBe(200);
       expect(res.body.refreshToken).toEqual(expect.any(String));
       expect(res.cookies).toEqual([]);
+    });
+  });
+});
+
+describe("POST /auth/refresh", () => {
+  describe("given a valid refresh cookie", () => {
+    it("returns a new access token and replaces the refresh cookie", async () => {
+      const user = await createUserWithStatus(tableName, "kim", "pw", "active");
+      const login = await call(handler, LOGIN, { username: "kim", password: "pw" });
+
+      const res = await call(handler, REFRESH, undefined, { cookies: [cookiePair(login.cookies[0]!)] });
+
+      expect(res.status).toBe(200);
+      expect((await verifyAccessToken(res.body.accessToken, "test-secret", new Date())).sub).toBe(user.id);
+      expect(res.cookies).toHaveLength(1);
+      expect(cookiePair(res.cookies[0]!)).not.toBe(cookiePair(login.cookies[0]!));
     });
   });
 });
