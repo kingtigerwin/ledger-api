@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ApiError, authContext, json, noContent, parseBody, requireAdmin, withErrors } from "../http";
 import { createMembersStore, MemberNameTakenError, MemberNotFoundError } from "./members-store";
 import { createTransactionSchema, type Transaction } from "./transaction-schema";
-import { createTransactionsStore } from "./transactions-store";
+import { createTransactionsStore, TransactionExistsError } from "./transactions-store";
 
 export interface DataDeps {
   tableName: string;
@@ -72,7 +72,15 @@ export function createDataHandler(deps: DataDeps) {
       case "POST /api/v1/transactions": {
         const userId = requireScope(event, "transactions:write");
         const input = parseBody(event, createTransactionSchema);
-        return json(201, await withMemberName(userId, await transactions.create(userId, input, deps.now())));
+        try {
+          return json(201, await withMemberName(userId, await transactions.create(userId, input, deps.now())));
+        } catch (err) {
+          if (!(err instanceof TransactionExistsError)) throw err;
+          // A retry: answer with what was stored the first time.
+          const existing = await transactions.get(userId, input.id);
+          if (!existing) throw err;
+          return json(200, await withMemberName(userId, existing));
+        }
       }
       case "GET /api/v1/transactions/{id}": {
         const userId = requireScope(event, "transactions:read");

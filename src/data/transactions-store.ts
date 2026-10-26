@@ -2,6 +2,9 @@ import { GetCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../db-client";
 import type { CreateTransactionInput, Transaction } from "./transaction-schema";
 
+/** The ID was already used: the request is a retry (or a client bug), not a new transaction. */
+export class TransactionExistsError extends Error {}
+
 const userPk = (userId: string) => `USER#${userId}`;
 const sortKey = (date: string, id: string) => `${date}#${id}`;
 
@@ -29,20 +32,25 @@ export function createTransactionsStore(tableName: string) {
   return {
     async create(userId: string, input: CreateTransactionInput, now: Date): Promise<Transaction> {
       const transaction: Transaction = { ...input, version: 1, createdAt: now.toISOString(), updatedAt: now.toISOString() };
-      await ddb.send(
-        new TransactWriteCommand({
-          TransactItems: [
-            {
-              Put: {
-                TableName: tableName,
-                Item: { ...refKey(userId, input.id), date: input.date },
-                ConditionExpression: "attribute_not_exists(pk)",
+      try {
+        await ddb.send(
+          new TransactWriteCommand({
+            TransactItems: [
+              {
+                Put: {
+                  TableName: tableName,
+                  Item: { ...refKey(userId, input.id), date: input.date },
+                  ConditionExpression: "attribute_not_exists(pk)",
+                },
               },
-            },
-            { Put: { TableName: tableName, Item: toItem(userId, transaction) } },
-          ],
-        }),
-      );
+              { Put: { TableName: tableName, Item: toItem(userId, transaction) } },
+            ],
+          }),
+        );
+      } catch (err) {
+        if (err instanceof Error && err.name === "TransactionCanceledException") throw new TransactionExistsError();
+        throw err;
+      }
       return transaction;
     },
 
