@@ -163,6 +163,20 @@ export function createTransactionsStore(tableName: string) {
       return { items: (res.Items ?? []).map(fromItem), lastKey: res.LastEvaluatedKey };
     },
 
+    /** One read on the by-member index: does this member have any transactions at all? */
+    async memberHasTransactions(userId: string, memberId: string): Promise<boolean> {
+      const res = await ddb.send(
+        new QueryCommand({
+          TableName: tableName,
+          IndexName: "byMember",
+          KeyConditionExpression: "gsi1pk = :pk",
+          ExpressionAttributeValues: { ":pk": `${userPk(userId)}#MEMBER#${memberId}` },
+          Limit: 1,
+        }),
+      );
+      return (res.Items ?? []).length > 0;
+    },
+
     async get(userId: string, id: string): Promise<Transaction | undefined> {
       const { Item: ref } = await ddb.send(
         new GetCommand({ TableName: tableName, Key: refKey(userId, id), ConsistentRead: true }),

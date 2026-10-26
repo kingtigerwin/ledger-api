@@ -66,6 +66,7 @@ export function createDataHandler(deps: DataDeps) {
   const requireMember = async (userId: string, memberId: string) => {
     const member = await members.get(userId, memberId);
     if (!member) throw new ApiError(422, "member_not_found", "That member isn't in this household");
+    if (member.archived) throw new ApiError(422, "member_archived", "That member is archived");
     return member;
   };
 
@@ -154,7 +155,12 @@ export function createDataHandler(deps: DataDeps) {
       }
       case "DELETE /api/v1/members/{id}": {
         const userId = requireScope(event, "members:write");
-        await mapMemberErrors(() => members.delete(userId, event.pathParameters?.id ?? ""));
+        const memberId = event.pathParameters?.id ?? "";
+        // Members with history are archived so their transactions keep a name.
+        if (await transactions.memberHasTransactions(userId, memberId)) {
+          return json(200, await mapMemberErrors(() => members.archive(userId, memberId, deps.now())));
+        }
+        await mapMemberErrors(() => members.delete(userId, memberId));
         return noContent();
       }
       case "GET /api/v1/admin/users/{id}/members": {
@@ -168,15 +174,18 @@ export function createDataHandler(deps: DataDeps) {
         if (ulidTime(input.id).getTime() > now.getTime() + MAX_CLOCK_SKEW_MS) {
           throw new ApiError(400, "invalid_id", "The id's timestamp is in the future");
         }
+        // A retry returns what was stored, even if the member has since been archived.
+        const existing = await transactions.get(userId, input.id);
+        if (existing) return json(200, await withMemberName(userId, existing));
         await requireMember(userId, input.memberId);
         try {
           return json(201, await withMemberName(userId, await transactions.create(userId, input, now)));
         } catch (err) {
           if (!(err instanceof TransactionExistsError)) throw err;
-          // A retry: answer with what was stored the first time.
-          const existing = await transactions.get(userId, input.id);
-          if (!existing) throw err;
-          return json(200, await withMemberName(userId, existing));
+          // A retry that raced the first request: answer with what was stored.
+          const stored = await transactions.get(userId, input.id);
+          if (!stored) throw err;
+          return json(200, await withMemberName(userId, stored));
         }
       }
       case "GET /api/v1/transactions/{id}": {
@@ -188,9 +197,13 @@ export function createDataHandler(deps: DataDeps) {
       case "PATCH /api/v1/transactions/{id}": {
         const userId = requireScope(event, "transactions:write");
         const { version, ...changes } = parseBody(event, updateTransactionSchema);
-        if (changes.memberId) await requireMember(userId, changes.memberId);
+        const id = event.pathParameters?.id ?? "";
+        // Only a change of member is checked, so other edits still work after a member is archived.
+        if (changes.memberId && changes.memberId !== (await transactions.get(userId, id))?.memberId) {
+          await requireMember(userId, changes.memberId);
+        }
         try {
-          const updated = await transactions.update(userId, event.pathParameters?.id ?? "", version, changes, deps.now());
+          const updated = await transactions.update(userId, id, version, changes, deps.now());
           return json(200, await withMemberName(userId, updated));
         } catch (err) {
           if (err instanceof TransactionNotFoundError) throw new ApiError(404, "transaction_not_found", "No such transaction");
