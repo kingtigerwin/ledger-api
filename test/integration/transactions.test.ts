@@ -44,6 +44,8 @@ const expense = (memberId: string, overrides: Record<string, unknown> = {}) => (
 
 const create = (house: string, body: unknown) =>
   call(handler, "POST /api/v1/transactions", body, { auth: customer(house) });
+const patch = (house: string, id: string, body: unknown) =>
+  call(handler, "PATCH /api/v1/transactions/{id}", body, { auth: customer(house), params: { id } });
 const get = (house: string, id: string) =>
   call(handler, "GET /api/v1/transactions/{id}", undefined, { auth: customer(house), params: { id } });
 
@@ -129,6 +131,64 @@ describe("POST /transactions and GET /transactions/{id}", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.error.code).toBe("member_not_found");
+    });
+  });
+});
+
+describe("PATCH /transactions/{id}", () => {
+  describe("given the current version", () => {
+    it("applies the change and bumps the version", async () => {
+      const mom = await addMember("tx-house-f", "mom");
+      const body = expense(mom);
+      await create("tx-house-f", body);
+
+      const res = await patch("tx-house-f", body.id, { version: 1, amountCents: 12000, note: "plus fruit" });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id: body.id, amountCents: 12000, note: "plus fruit", item: "菜", version: 2 });
+      expect((await get("tx-house-f", body.id)).body).toEqual(res.body);
+    });
+  });
+
+  describe("given a version someone else already changed", () => {
+    it("refuses with 409 version_conflict and keeps their change", async () => {
+      const dad = await addMember("tx-house-g", "dad");
+      const body = expense(dad);
+      await create("tx-house-g", body);
+      await patch("tx-house-g", body.id, { version: 1, amountCents: 5000 });
+
+      const res = await patch("tx-house-g", body.id, { version: 1, amountCents: 7000 });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("version_conflict");
+      expect((await get("tx-house-g", body.id)).body.amountCents).toBe(5000);
+    });
+  });
+
+  describe("given a new date and member", () => {
+    it("moves the transaction and it's still found by id", async () => {
+      const mom = await addMember("tx-house-h", "mom");
+      const dad = await addMember("tx-house-h", "dad");
+      const body = expense(mom);
+      await create("tx-house-h", body);
+
+      const res = await patch("tx-house-h", body.id, { version: 1, date: "2026-09-01", memberId: dad });
+
+      expect(res.status).toBe(200);
+      expect((await get("tx-house-h", body.id)).body).toMatchObject({ date: "2026-09-01", memberId: dad, memberName: "dad" });
+    });
+  });
+
+  describe("given another household's transaction", () => {
+    it("returns 404", async () => {
+      const aunt = await addMember("tx-house-i", "aunt");
+      const body = expense(aunt);
+      await create("tx-house-i", body);
+
+      const res = await patch("tx-house-j", body.id, { version: 1, amountCents: 1 });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe("transaction_not_found");
     });
   });
 });
