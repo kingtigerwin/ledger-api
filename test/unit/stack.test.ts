@@ -83,6 +83,40 @@ describe("LedgerStack", () => {
     expect(JSON.stringify(put?.Resource)).toContain("ledger-api/admin-password");
   });
 
+  it("has a Data table with by-member and by-category indexes", () => {
+    template.hasResourceProperties("AWS::DynamoDB::GlobalTable", {
+      BillingMode: "PAY_PER_REQUEST",
+      GlobalSecondaryIndexes: [
+        Match.objectLike({
+          IndexName: "byMember",
+          KeySchema: [
+            { AttributeName: "gsi1pk", KeyType: "HASH" },
+            { AttributeName: "gsi1sk", KeyType: "RANGE" },
+          ],
+        }),
+        Match.objectLike({
+          IndexName: "byCategory",
+          KeySchema: [
+            { AttributeName: "gsi2pk", KeyType: "HASH" },
+            { AttributeName: "gsi2sk", KeyType: "RANGE" },
+          ],
+        }),
+      ],
+    });
+  });
+
+  it("puts the member routes and the admin's member view behind the authorizer", () => {
+    for (const routeKey of [
+      "POST /api/v1/members",
+      "GET /api/v1/members",
+      "PATCH /api/v1/members/{id}",
+      "DELETE /api/v1/members/{id}",
+      "GET /api/v1/admin/users/{id}/members",
+    ]) {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: routeKey, AuthorizationType: "CUSTOM" });
+    }
+  });
+
   it("protects /auth/me and leaves the sign-in routes public", () => {
     template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
       RouteKey: "GET /api/v1/auth/me",
