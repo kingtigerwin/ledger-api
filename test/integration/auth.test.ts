@@ -127,4 +127,33 @@ describe("POST /auth/login", () => {
       expect(res.body.error.code).toBe("invalid_credentials");
     });
   });
+
+  describe("given 5 failed logins in a row", () => {
+    let now: Date;
+    let clocked: ReturnType<typeof createAuthHandler>;
+
+    beforeAll(async () => {
+      now = new Date("2026-10-26T10:00:00Z");
+      clocked = createAuthHandler({ tableName, signingSecret: "test-secret", now: () => now });
+      await createUserWithStatus("heidi", "pw", "active");
+      for (let i = 0; i < 5; i++) await call(clocked, LOGIN, { username: "heidi", password: "wrong" });
+    });
+
+    it("locks the username, even against the correct password", async () => {
+      now = new Date("2026-10-26T10:14:59Z");
+
+      const res = await call(clocked, LOGIN, { username: "heidi", password: "pw" });
+
+      expect(res.status).toBe(423);
+      expect(res.body.error.code).toBe("account_locked");
+    });
+
+    it("unlocks once 15 minutes have passed", async () => {
+      now = new Date("2026-10-26T10:15:01Z");
+
+      const res = await call(clocked, LOGIN, { username: "heidi", password: "pw" });
+
+      expect(res.status).toBe(200);
+    });
+  });
 });
