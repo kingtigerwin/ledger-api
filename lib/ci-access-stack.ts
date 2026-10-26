@@ -6,8 +6,12 @@ import { ADMIN_PASSWORD_PARAM } from "../src/config";
 const GITHUB_OIDC = "token.actions.githubusercontent.com";
 
 export interface CiAccessStackProps extends StackProps {
-  /** `owner/name` of the GitHub repo allowed to deploy. */
-  repo: string;
+  /**
+   * The start of the `sub` claim in the repo's GitHub OIDC tokens. Repos using GitHub's immutable
+   * subject format send `repo:<owner>@<ownerId>/<repo>@<repoId>`; look it up with
+   * `gh api repos/<owner>/<repo>/actions/oidc/customization/sub` (`sub_claim_prefix`).
+   */
+  githubSubjectPrefix: string;
 }
 
 /**
@@ -29,7 +33,7 @@ export class CiAccessStack extends Stack {
       assumedBy: new WebIdentityPrincipal(provider.attrArn, {
         StringEquals: {
           [`${GITHUB_OIDC}:aud`]: "sts.amazonaws.com",
-          [`${GITHUB_OIDC}:sub`]: `repo:${props.repo}:ref:refs/heads/main`,
+          [`${GITHUB_OIDC}:sub`]: `${props.githubSubjectPrefix}:ref:refs/heads/main`,
         },
       }),
     });
