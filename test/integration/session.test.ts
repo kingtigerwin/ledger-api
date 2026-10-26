@@ -66,4 +66,18 @@ describe("POST /auth/refresh", () => {
       expect(cookiePair(res.cookies[0]!)).not.toBe(cookiePair(login.cookies[0]!));
     });
   });
+
+  describe("given a refresh token sent in the body", () => {
+    it("returns the replacement in the body", async () => {
+      await createUserWithStatus(tableName, "leo", "pw", "active");
+      const login = await call(handler, LOGIN, { username: "leo", password: "pw", refreshTokenIn: "body" });
+
+      const res = await call(handler, REFRESH, { refreshToken: login.body.refreshToken });
+
+      expect(res.status).toBe(200);
+      expect(res.body.refreshToken).toEqual(expect.any(String));
+      expect(res.body.refreshToken).not.toBe(login.body.refreshToken);
+      expect(res.cookies).toEqual([]);
+    });
+  });
 });
