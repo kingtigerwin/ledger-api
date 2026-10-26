@@ -64,6 +64,25 @@ describe("LedgerStack", () => {
     });
   });
 
+  it("puts the admin routes behind the authorizer", () => {
+    for (const routeKey of [
+      "GET /api/v1/admin/users",
+      "POST /api/v1/admin/users/{id}/enable",
+      "POST /api/v1/admin/users/{id}/disable",
+    ]) {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: routeKey, AuthorizationType: "CUSTOM" });
+    }
+  });
+
+  it("runs the bootstrap on deploy, allowed to create both SSM parameters", () => {
+    template.resourceCountIs("AWS::CloudFormation::CustomResource", 1);
+    const policies = Object.values(template.findResources("AWS::IAM::Policy"));
+    const statements = policies.flatMap((p) => p.Properties.PolicyDocument.Statement);
+    const put = statements.find((s) => [s.Action].flat().includes("ssm:PutParameter"));
+    expect(JSON.stringify(put?.Resource)).toContain("ledger-api/jwt-signing-secret");
+    expect(JSON.stringify(put?.Resource)).toContain("ledger-api/admin-password");
+  });
+
   it("protects /auth/me and leaves the sign-in routes public", () => {
     template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
       RouteKey: "GET /api/v1/auth/me",
