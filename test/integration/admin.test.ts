@@ -83,3 +83,37 @@ describe("POST /admin/users/{id}/enable", () => {
     });
   });
 });
+
+describe("POST /admin/users/{id}/disable", () => {
+  describe("given an active, logged-in customer", () => {
+    it("blocks login and ends their refresh token immediately", async () => {
+      const user = await createUserWithStatus(tableName, "rita", "pw", "active");
+      const session = await login("rita", "pw");
+
+      const res = await call(handler, "POST /api/v1/admin/users/{id}/disable", undefined, {
+        auth: ADMIN,
+        params: { id: user.id },
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("disabled");
+      expect((await login("rita", "pw")).status).toBe(401);
+      const refresh = await call(auth, "POST /api/v1/auth/refresh", { refreshToken: session.body.refreshToken });
+      expect(refresh.status).toBe(401);
+    });
+  });
+
+  describe("given an admin", () => {
+    it("refuses, so the last admin can't be locked out", async () => {
+      const admin = await createUserWithStatus(tableName, "root", "pw", "active", "admin");
+
+      const res = await call(handler, "POST /api/v1/admin/users/{id}/disable", undefined, {
+        auth: ADMIN,
+        params: { id: admin.id },
+      });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("cannot_disable_admin");
+    });
+  });
+});
