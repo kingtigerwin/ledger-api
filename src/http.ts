@@ -20,8 +20,8 @@ export class ApiError extends Error {
   }
 }
 
-export function json(statusCode: number, body: unknown): APIGatewayProxyStructuredResultV2 {
-  return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
+export function json(statusCode: number, body: unknown, cookies?: string[]): APIGatewayProxyStructuredResultV2 {
+  return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body), cookies };
 }
 
 export function parseBody<T extends z.ZodType>(event: APIGatewayProxyEventV2, schema: T): z.infer<T> {

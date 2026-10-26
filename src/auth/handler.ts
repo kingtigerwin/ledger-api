@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ApiError, json, parseBody, withErrors } from "../http";
 import { hashPassword, verifyPassword } from "./password";
+import { generateRefreshToken, refreshCookie } from "./refresh-tokens";
 import { ACCESS_TOKEN_TTL_SECONDS, signAccessToken } from "./tokens";
 import { createUsersStore, UsernameTakenError } from "./users-store";
 
@@ -62,7 +63,8 @@ export function createAuthHandler(deps: AuthDeps) {
           deps.signingSecret,
           now,
         );
-        return json(200, { accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS });
+        const refreshToken = generateRefreshToken(found.user.id);
+        return json(200, { accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS }, [refreshCookie(refreshToken)]);
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);
