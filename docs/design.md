@@ -102,9 +102,12 @@ All under `/api/v1`.
 
 ## Operations
 
-- GitHub Actions: tests on pull requests; deploy on push to `main` using GitHub OIDC (no stored AWS keys).
-- Lambda JSON logs kept for 2 weeks. A shared logging helper strips passwords, tokens and `Authorization` headers.
-- CloudWatch alarms (API 5xx, Lambda errors and throttles, spike in failed logins) email the address in the `alarmEmail` CDK context value via SNS.
+- GitHub Actions: tests on pull requests; on push to `main`, a `deploy` job runs after the tests, assumes `ledger-api-github-deploy` via GitHub OIDC (no stored AWS keys), runs `cdk deploy LedgerApi`, then the smoke test.
+  - The deploy role is in a separate `LedgerApiCiAccess` stack deployed once by hand. Only `repo:kingtigerwin/ledger-api:ref:refs/heads/main` can assume it, and it can only assume CDK's bootstrap roles (`cdk-hnb659fds-*`) and read the admin password for the smoke test.
+- CloudFront sends `/api/*` (and, for now, the default behaviour) to API Gateway with caching disabled and the `AllViewerExceptHostHeader` origin request policy, so `Authorization`, cookies and query strings reach the API. The raw `execute-api` URL also stays reachable; blocking it would need WAF or a shared-secret header.
+- Lambda JSON logs kept for 2 weeks. All logging goes through `src/log.ts`, which redacts passwords, tokens, cookies and `Authorization` headers.
+- Four CloudWatch alarms (within the free 10), emailing the address in the `alarmEmail` CDK context value (GitHub variable `ALARM_EMAIL`) via SNS: API 5xx ≥ 1, Lambda errors ≥ 1 and throttles ≥ 1 (account-wide metrics, so they also cover other Lambdas in the account and region), and ≥ 20 failed logins in 5 minutes.
+- The smoke test reuses one user, `smoke-test` (password in the GitHub secret `SMOKE_TEST_PASSWORD`), which the admin approves on its first run; it deletes the member and transaction it creates.
 
 ## Testing
 
