@@ -1,27 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAuthHandler } from "../../src/auth/handler";
-import { hashPassword } from "../../src/auth/password";
 import { verifyAccessToken } from "../../src/auth/tokens";
-import { createUsersStore } from "../../src/auth/users-store";
 import { createUsersTable, deleteTable } from "../support/dynamo";
 import { call } from "../support/http";
+import { createUserWithStatus } from "../support/users";
 
 const REGISTER = "POST /api/v1/auth/register";
 const LOGIN = "POST /api/v1/auth/login";
 
 let tableName: string;
 let handler: ReturnType<typeof createAuthHandler>;
-
-// Stands in for admin approval until the enable endpoint exists (Stage 3).
-async function createUserWithStatus(username: string, password: string, status: "active" | "disabled") {
-  return createUsersStore(tableName).create({
-    username,
-    passwordHash: await hashPassword(password),
-    role: "customer",
-    status,
-    now: new Date(),
-  });
-}
 
 beforeAll(async () => {
   tableName = await createUsersTable();
@@ -102,7 +90,7 @@ describe("POST /auth/login", () => {
 
   describe("given an active user with the correct password", () => {
     it("returns an access token for that customer", async () => {
-      const user = await createUserWithStatus("frank", "pw", "active");
+      const user = await createUserWithStatus(tableName, "frank", "pw", "active");
 
       const res = await call(handler, LOGIN, { username: "Frank", password: "pw" });
 
@@ -119,7 +107,7 @@ describe("POST /auth/login", () => {
 
   describe("given a disabled user with the correct password", () => {
     it("refuses with the same invalid_credentials error", async () => {
-      await createUserWithStatus("grace", "pw", "disabled");
+      await createUserWithStatus(tableName, "grace", "pw", "disabled");
 
       const res = await call(handler, LOGIN, { username: "grace", password: "pw" });
 
@@ -135,7 +123,7 @@ describe("POST /auth/login", () => {
     beforeAll(async () => {
       now = new Date("2026-10-26T10:00:00Z");
       clocked = createAuthHandler({ tableName, signingSecret: "test-secret", now: () => now });
-      await createUserWithStatus("heidi", "pw", "active");
+      await createUserWithStatus(tableName, "heidi", "pw", "active");
       for (let i = 0; i < 5; i++) await call(clocked, LOGIN, { username: "heidi", password: "wrong" });
     });
 

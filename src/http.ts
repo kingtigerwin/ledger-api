@@ -4,6 +4,7 @@ import type {
   APIGatewayProxyStructuredResultV2,
 } from "aws-lambda";
 import type { z } from "zod";
+import type { AuthContext } from "./auth/authorizer";
 
 export type Handler = (event: APIGatewayProxyEventV2) => Promise<APIGatewayProxyResultV2>;
 
@@ -20,8 +21,22 @@ export class ApiError extends Error {
   }
 }
 
-export function json(statusCode: number, body: unknown): APIGatewayProxyStructuredResultV2 {
-  return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
+/**
+ * The caller, as the Lambda authorizer passed it. Every protected route is behind the authorizer,
+ * so a missing context means a misconfigured route; refuse rather than serve anonymously.
+ */
+export function authContext(event: APIGatewayProxyEventV2): AuthContext {
+  const ctx = (event.requestContext as { authorizer?: { lambda?: AuthContext } }).authorizer?.lambda;
+  if (!ctx?.userId) throw new ApiError(401, "unauthorized", "Sign in first");
+  return ctx;
+}
+
+export function json(statusCode: number, body: unknown, cookies?: string[]): APIGatewayProxyStructuredResultV2 {
+  return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body), cookies };
+}
+
+export function noContent(cookies?: string[]): APIGatewayProxyStructuredResultV2 {
+  return { statusCode: 204, cookies };
 }
 
 export function parseBody<T extends z.ZodType>(event: APIGatewayProxyEventV2, schema: T): z.infer<T> {
