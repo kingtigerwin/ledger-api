@@ -102,7 +102,8 @@ All under `/api/v1`.
 
 ## Operations
 
-- GitHub Actions: tests on pull requests; on push to `main`, a `deploy` job runs after the tests, assumes `ledger-api-github-deploy` via GitHub OIDC (no stored AWS keys), runs `cdk deploy LedgerApi`, then the smoke test.
+- GitHub Actions: tests on pull requests; on push to `main` (once the repo variable `DEPLOY_ENABLED` is `true`), a `deploy` job runs after the tests, assumes `ledger-api-github-deploy` via GitHub OIDC (no stored AWS keys), runs `cdk deploy LedgerApi`, then the smoke test.
+  - The deploy role's ARN is a repo secret, and `mask-aws-account-id` is on, so the AWS account ID never appears in this public repo's logs.
   - The deploy role is in a separate `LedgerApiCiAccess` stack deployed once by hand. Only `repo:kingtigerwin/ledger-api:ref:refs/heads/main` can assume it, and it can only assume CDK's bootstrap roles (`cdk-hnb659fds-*`) and read the admin password for the smoke test.
 - CloudFront sends `/api/*` (and, for now, the default behaviour) to API Gateway with caching disabled and the `AllViewerExceptHostHeader` origin request policy, so `Authorization`, cookies and query strings reach the API. The raw `execute-api` URL also stays reachable; blocking it would need WAF or a shared-secret header.
 - Lambda JSON logs kept for 2 weeks. All logging goes through `src/log.ts`, which redacts passwords, tokens, cookies and `Authorization` headers.
