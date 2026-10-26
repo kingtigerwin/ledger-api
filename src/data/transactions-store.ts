@@ -106,6 +106,19 @@ export function createTransactionsStore(tableName: string) {
       return next;
     },
 
+    async delete(userId: string, id: string): Promise<void> {
+      const current = await this.get(userId, id);
+      if (!current) throw new TransactionNotFoundError();
+      await ddb.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            { Delete: { TableName: tableName, Key: mainKey(userId, current.date, id) } },
+            { Delete: { TableName: tableName, Key: refKey(userId, id) } },
+          ],
+        }),
+      );
+    },
+
     async get(userId: string, id: string): Promise<Transaction | undefined> {
       const { Item: ref } = await ddb.send(
         new GetCommand({ TableName: tableName, Key: refKey(userId, id), ConsistentRead: true }),
