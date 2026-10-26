@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ApiError, json, noContent, parseBody, withErrors } from "../http";
+import { ApiError, authContext, json, noContent, parseBody, withErrors } from "../http";
 import { hashPassword, verifyPassword } from "./password";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import {
@@ -130,6 +130,12 @@ export function createAuthHandler(deps: AuthDeps) {
         const userId = found?.token.split(".")[0];
         if (found && userId) await users.deleteRefreshToken(userId, hashRefreshToken(found.token));
         return noContent([clearRefreshCookie()]);
+      }
+      case "GET /api/v1/auth/me": {
+        const user = await users.getById(authContext(event).userId);
+        if (!user) throw new ApiError(401, "unauthorized", "Sign in first");
+        const { id, username, role, status } = user;
+        return json(200, { id, username, role, status });
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);
