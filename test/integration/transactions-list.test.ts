@@ -156,3 +156,24 @@ describe("GET /transactions/summary", () => {
     });
   });
 });
+
+describe("GET /admin/users/{id}/transactions", () => {
+  const ADMIN: AuthContext = { userId: "admin-1", role: "admin", scope: "admin:read admin:write" };
+  const asAdmin = (query: Record<string, string>, auth: AuthContext = ADMIN) =>
+    call(handler, "GET /api/v1/admin/users/{id}/transactions", undefined, { auth, params: { id: HOUSE }, query });
+
+  describe("given an admin", () => {
+    it("lists that customer's transactions with the same filters", async () => {
+      const res = await asAdmin({ memberId: mom, category: "groceries" });
+
+      expect(res.status).toBe(200);
+      expect(amounts(res.body.items)).toEqual([6000, 4000, 1000]);
+    });
+  });
+
+  describe("given a customer", () => {
+    it("refuses with 403", async () => {
+      expect((await asAdmin({}, customer("snoop"))).status).toBe(403);
+    });
+  });
+});
