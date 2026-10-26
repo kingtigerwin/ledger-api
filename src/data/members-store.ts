@@ -101,6 +101,20 @@ export function createMembersStore(tableName: string) {
       return { ...current, name, updatedAt: now.toISOString() };
     },
 
+    /** Deletes the member and frees their name. */
+    async delete(userId: string, memberId: string): Promise<void> {
+      const current = await this.get(userId, memberId);
+      if (!current) throw new MemberNotFoundError();
+      await ddb.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            { Delete: { TableName: tableName, Key: memberKey(userId, memberId) } },
+            { Delete: { TableName: tableName, Key: nameKey(userId, current.name) } },
+          ],
+        }),
+      );
+    },
+
     /** A household has a handful of members, so this returns them all, sorted by name. */
     async list(userId: string): Promise<Member[]> {
       const members: Member[] = [];
