@@ -115,6 +115,11 @@ export class LedgerStack extends Stack {
       ["/api/v1/members", [HttpMethod.POST, HttpMethod.GET]],
       ["/api/v1/members/{id}", [HttpMethod.PATCH, HttpMethod.DELETE]],
       ["/api/v1/admin/users/{id}/members", [HttpMethod.GET]],
+      ["/api/v1/transactions", [HttpMethod.POST, HttpMethod.GET]],
+      // A static segment wins over {id}, so /summary never reaches the {id} route.
+      ["/api/v1/transactions/summary", [HttpMethod.GET]],
+      ["/api/v1/transactions/{id}", [HttpMethod.GET, HttpMethod.PATCH, HttpMethod.DELETE]],
+      ["/api/v1/admin/users/{id}/transactions", [HttpMethod.GET]],
     ];
     for (const [routePath, methods] of dataRoutes) {
       api.addRoutes({ path: routePath, methods, integration: data, authorizer });
