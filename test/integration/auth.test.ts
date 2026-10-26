@@ -71,4 +71,18 @@ describe("POST /auth/login", () => {
       expect(res.body.error.code).toBe("account_pending");
     });
   });
+
+  describe("given credentials that don't match", () => {
+    it.each([
+      ["an unknown username", { username: "nobody", password: "pw" }],
+      ["a pending user's wrong password", { username: "erin", password: "wrong" }],
+    ])("refuses %s with the same invalid_credentials error", async (_, body) => {
+      await call(handler, REGISTER, { username: "erin", password: "pw" });
+
+      const res = await call(handler, LOGIN, body);
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toEqual({ code: "invalid_credentials", message: "Invalid username or password" });
+    });
+  });
 });
