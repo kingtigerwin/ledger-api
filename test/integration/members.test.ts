@@ -42,4 +42,17 @@ describe("POST /members and GET /members", () => {
       expect(res.body).toEqual({ items: [created.body], nextCursor: null });
     });
   });
+
+  describe("given a name already used in the household, in any letter case", () => {
+    it("rejects it, while another household can still use it", async () => {
+      await call(handler, "POST /api/v1/members", { name: "Dad" }, { auth: customer("house-c") });
+
+      const duplicate = await call(handler, "POST /api/v1/members", { name: "dAD" }, { auth: customer("house-c") });
+      const elsewhere = await call(handler, "POST /api/v1/members", { name: "Dad" }, { auth: customer("house-d") });
+
+      expect(duplicate.status).toBe(409);
+      expect(duplicate.body.error.code).toBe("member_name_taken");
+      expect(elsewhere.status).toBe(201);
+    });
+  });
 });
