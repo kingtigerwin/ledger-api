@@ -82,4 +82,18 @@ describe("POST /transactions and GET /transactions/{id}", () => {
       expect(res.body.error.code).toBe("transaction_not_found");
     });
   });
+
+  describe("given the same id sent twice, as a retry would", () => {
+    it("returns the original record with 200 and keeps a single transaction", async () => {
+      const kid = await addMember("tx-house-d", "kid");
+      const body = expense(kid);
+      const first = await create("tx-house-d", body);
+
+      const retry = await create("tx-house-d", { ...body, amountCents: 99999 });
+
+      expect(retry.status).toBe(200);
+      expect(retry.body).toEqual(first.body);
+      expect((await get("tx-house-d", body.id)).body.amountCents).toBe(10000);
+    });
+  });
 });
