@@ -9,7 +9,7 @@ describe("CiAccessStack", () => {
   beforeAll(() => {
     const stack = new CiAccessStack(new App(), "LedgerApiCiAccess", {
       env: { account: "123456789012", region: "ap-southeast-2" },
-      repo: "kingtigerwin/ledger-api",
+      githubSubjectPrefix: "repo:kingtigerwin@9473411/ledger-api@1434244010",
     });
     template = Template.fromStack(stack);
   });
@@ -30,7 +30,9 @@ describe("CiAccessStack", () => {
             Condition: {
               StringEquals: {
                 "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-                "token.actions.githubusercontent.com:sub": "repo:kingtigerwin/ledger-api:ref:refs/heads/main",
+                // GitHub's immutable subject format: owner and repo names with their numeric IDs.
+                "token.actions.githubusercontent.com:sub":
+                  "repo:kingtigerwin@9473411/ledger-api@1434244010:ref:refs/heads/main",
               },
             },
           }),
