@@ -56,3 +56,57 @@ describe("POST /members and GET /members", () => {
     });
   });
 });
+
+describe("PATCH /members/{id}", () => {
+  const create = (house: string, name: string) =>
+    call(handler, "POST /api/v1/members", { name }, { auth: customer(house) }).then((r) => r.body);
+  const rename = (house: string, id: string, name: string) =>
+    call(handler, "PATCH /api/v1/members/{id}", { name }, { auth: customer(house), params: { id } });
+
+  describe("given a new, unused name", () => {
+    it("renames the member and frees the old name", async () => {
+      const mum = await create("house-e", "mum");
+
+      const res = await rename("house-e", mum.id, "Mom");
+      const reuseOld = await call(handler, "POST /api/v1/members", { name: "mum" }, { auth: customer("house-e") });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id: mum.id, name: "Mom" });
+      expect(reuseOld.status).toBe(201);
+    });
+  });
+
+  describe("given only a change of letter case", () => {
+    it("renames the member", async () => {
+      const kid = await create("house-f", "kid");
+
+      const res = await rename("house-f", kid.id, "Kid");
+
+      expect(res.status).toBe(200);
+      expect(res.body.name).toBe("Kid");
+    });
+  });
+
+  describe("given a name another member already has", () => {
+    it("rejects it", async () => {
+      await create("house-g", "Grandma");
+      const other = await create("house-g", "Gran");
+
+      const res = await rename("house-g", other.id, "grandma");
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("member_name_taken");
+    });
+  });
+
+  describe("given another household's member", () => {
+    it("returns 404, as if it didn't exist", async () => {
+      const theirs = await create("house-h", "Aunt");
+
+      const res = await rename("house-i", theirs.id, "Mine now");
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe("member_not_found");
+    });
+  });
+});
