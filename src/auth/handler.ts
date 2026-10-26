@@ -110,8 +110,9 @@ export function createAuthHandler(deps: AuthDeps) {
         try {
           await users.rotateRefreshToken(user.id, hashRefreshToken(token), hashRefreshToken(next), now, refreshExpiry(now));
         } catch (err) {
-          if (err instanceof InvalidRefreshTokenError) throw invalidRefreshToken();
-          throw err;
+          if (!(err instanceof InvalidRefreshTokenError)) throw err;
+          if (err.reused) await users.revokeRefreshTokens(user.id);
+          throw invalidRefreshToken();
         }
         const accessToken = await accessTokenFor(user, now);
         return withRefreshToken({ accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS }, next, deliverIn);

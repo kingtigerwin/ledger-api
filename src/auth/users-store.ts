@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { GetCommand, PutCommand, TransactWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  DeleteCommand,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+  type QueryCommandOutput,
+  TransactWriteCommand,
+  UpdateCommand,
+} from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../db-client";
 
 const MAX_FAILED_LOGINS = 5;
@@ -18,7 +26,12 @@ export interface User {
 
 export class UsernameTakenError extends Error {}
 
-export class InvalidRefreshTokenError extends Error {}
+export class InvalidRefreshTokenError extends Error {
+  /** True when the token existed but had already been replaced: a sign it was copied. */
+  constructor(readonly reused: boolean) {
+    super(reused ? "Refresh token reused" : "Unknown refresh token");
+  }
+}
 
 const profileKey = (id: string) => ({ pk: `USER#${id}`, sk: "PROFILE" });
 const usernameKey = (username: string) => ({ pk: `USERNAME#${username}`, sk: "USERNAME" });
@@ -143,9 +156,32 @@ export function createUsersStore(tableName: string) {
           }),
         );
       } catch (err) {
-        if (err instanceof Error && err.name === "TransactionCanceledException") throw new InvalidRefreshTokenError();
-        throw err;
+        if (!(err instanceof Error && err.name === "TransactionCanceledException")) throw err;
+        const { Item } = await ddb.send(
+          new GetCommand({ TableName: tableName, Key: refreshTokenKey(userId, oldHash), ConsistentRead: true }),
+        );
+        throw new InvalidRefreshTokenError(Boolean(Item?.replacedAt));
       }
+    },
+
+    /** Deletes every refresh token the user has, logging them out everywhere within one access-token lifetime. */
+    async revokeRefreshTokens(userId: string): Promise<void> {
+      let startKey: Record<string, unknown> | undefined;
+      do {
+        const page: QueryCommandOutput = await ddb.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+            ExpressionAttributeValues: { ":pk": `USER#${userId}`, ":prefix": "REFRESH#" },
+            ProjectionExpression: "pk, sk",
+            ExclusiveStartKey: startKey,
+          }),
+        );
+        await Promise.all(
+          (page.Items ?? []).map((key) => ddb.send(new DeleteCommand({ TableName: tableName, Key: key }))),
+        );
+        startKey = page.LastEvaluatedKey;
+      } while (startKey);
     },
 
     async clearFailedLogins(userId: string): Promise<void> {
