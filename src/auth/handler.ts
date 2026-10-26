@@ -1,7 +1,7 @@
-import { z } from "zod";
 import { ApiError, authContext, json, noContent, parseBody, withErrors } from "../http";
 import { log as defaultLog, type Logger } from "../log";
 import { hashPassword, verifyPassword } from "./password";
+import { credentialsSchema, loginSchema } from "./schemas";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import {
   clearRefreshCookie,
@@ -26,15 +26,7 @@ const SCOPES: Record<Role, string> = {
   admin: "admin:read admin:write",
 };
 
-export const credentialsSchema = z.object({
-  username: z.string().min(1).max(64).toLowerCase(),
-  password: z.string().min(1).max(1024),
-});
 
-export const loginSchema = credentialsSchema.extend({
-  // Browsers get the refresh token only as an HttpOnly cookie; non-browser clients (an agent) ask for it in the body.
-  refreshTokenIn: z.enum(["cookie", "body"]).default("cookie"),
-});
 
 type Delivery = "cookie" | "body";
 

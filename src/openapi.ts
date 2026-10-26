@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { statusQuery } from "./admin/handler";
-import { credentialsSchema, loginSchema } from "./auth/handler";
-import { memberSchema } from "./data/handler";
+import { statusQuery } from "./admin/schemas";
+import { credentialsSchema, loginSchema } from "./auth/schemas";
+import { memberSchema } from "./data/member-schema";
 import {
   createTransactionSchema,
   listQuerySchema,

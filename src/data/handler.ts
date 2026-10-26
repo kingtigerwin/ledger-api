@@ -1,6 +1,7 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { z } from "zod";
 import { ApiError, authContext, json, noContent, parseBody, requireAdmin, withErrors } from "../http";
+import { memberSchema } from "./member-schema";
 import { createMembersStore, MemberNameTakenError, MemberNotFoundError } from "./members-store";
 import { decodeCursor, encodeCursor, InvalidCursorError } from "./cursor";
 import {
@@ -28,7 +29,6 @@ export interface DataDeps {
   now: () => Date;
 }
 
-export const memberSchema = z.object({ name: z.string().trim().min(1).max(50) });
 
 /** The caller's user ID, provided their token carries the scope this route needs. */
 function requireScope(event: APIGatewayProxyEventV2, scope: string): string {
