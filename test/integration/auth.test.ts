@@ -4,6 +4,7 @@ import { createUsersTable, deleteTable } from "../support/dynamo";
 import { call } from "../support/http";
 
 const REGISTER = "POST /api/v1/auth/register";
+const LOGIN = "POST /api/v1/auth/login";
 
 let tableName: string;
 let handler: ReturnType<typeof createAuthHandler>;
@@ -55,6 +56,19 @@ describe("POST /auth/register", () => {
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe("validation_failed");
+    });
+  });
+});
+
+describe("POST /auth/login", () => {
+  describe("given a pending user with the correct password", () => {
+    it("refuses with account_pending", async () => {
+      await call(handler, REGISTER, { username: "dave", password: "pw" });
+
+      const res = await call(handler, LOGIN, { username: "dave", password: "pw" });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe("account_pending");
     });
   });
 });
