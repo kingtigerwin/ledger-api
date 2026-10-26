@@ -43,4 +43,18 @@ describe("POST /auth/register", () => {
       expect(res.body.error.code).toBe("username_taken");
     });
   });
+
+  describe("given a field that is empty or too long", () => {
+    it.each([
+      ["an empty username", { username: "", password: "pw" }],
+      ["an empty password", { username: "carol", password: "" }],
+      ["a 65-character username", { username: "c".repeat(65), password: "pw" }],
+      ["a 1,025-character password", { username: "carol", password: "p".repeat(1025) }],
+    ])("rejects %s", async (_, body) => {
+      const res = await call(handler, REGISTER, body);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("validation_failed");
+    });
+  });
 });
