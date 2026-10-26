@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { z } from "zod";
-import { ApiError, authContext, json, noContent, parseBody, withErrors } from "../http";
+import { ApiError, authContext, json, noContent, parseBody, requireAdmin, withErrors } from "../http";
 import { createMembersStore, MemberNameTakenError, MemberNotFoundError } from "./members-store";
 
 export interface DataDeps {
@@ -55,6 +55,10 @@ export function createDataHandler(deps: DataDeps) {
         const userId = requireScope(event, "members:write");
         await claimingName(() => members.delete(userId, event.pathParameters?.id ?? ""));
         return noContent();
+      }
+      case "GET /api/v1/admin/users/{id}/members": {
+        requireAdmin(event, "admin:read");
+        return json(200, { items: await members.list(event.pathParameters?.id ?? ""), nextCursor: null });
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);
