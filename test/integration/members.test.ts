@@ -10,6 +10,8 @@ const customer = (userId: string): AuthContext => ({
   scope: "members:read members:write transactions:read transactions:write",
 });
 
+const ADMIN: AuthContext = { userId: "admin-1", role: "admin", scope: "admin:read admin:write" };
+
 let tableName: string;
 let handler: ReturnType<typeof createDataHandler>;
 
@@ -142,6 +144,44 @@ describe("DELETE /members/{id}", () => {
       expect(res.status).toBe(404);
       expect(res.body.error.code).toBe("member_not_found");
       expect(list.body.items).toHaveLength(1);
+    });
+  });
+});
+
+describe("scopes", () => {
+  describe("given an admin token on a customer route", () => {
+    it("refuses with 403, since admins have no household", async () => {
+      const res = await call(handler, "POST /api/v1/members", { name: "Boss" }, { auth: ADMIN });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe("forbidden");
+    });
+  });
+});
+
+describe("GET /admin/users/{id}/members", () => {
+  describe("given an admin", () => {
+    it("lists that customer's members", async () => {
+      const mom = await call(handler, "POST /api/v1/members", { name: "Mom" }, { auth: customer("house-m") });
+
+      const res = await call(handler, "GET /api/v1/admin/users/{id}/members", undefined, {
+        auth: ADMIN,
+        params: { id: "house-m" },
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ items: [mom.body], nextCursor: null });
+    });
+  });
+
+  describe("given a customer", () => {
+    it("refuses with 403", async () => {
+      const res = await call(handler, "GET /api/v1/admin/users/{id}/members", undefined, {
+        auth: customer("house-n"),
+        params: { id: "house-m" },
+      });
+
+      expect(res.status).toBe(403);
     });
   });
 });
