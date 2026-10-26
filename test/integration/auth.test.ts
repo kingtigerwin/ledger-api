@@ -32,4 +32,15 @@ describe("POST /auth/register", () => {
       });
     });
   });
+
+  describe("given a username that exists in different letter case", () => {
+    it("rejects it as taken", async () => {
+      await call(handler, REGISTER, { username: "bob", password: "pw" });
+
+      const res = await call(handler, REGISTER, { username: "Bob", password: "other" });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("username_taken");
+    });
+  });
 });
