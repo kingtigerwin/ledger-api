@@ -39,11 +39,12 @@ export class LedgerStack extends Stack {
         bundling: { minify: true, sourceMap: true },
         ...props,
       });
+      return fn;
+    };
+    const canReadSigningSecret = (fn: NodejsFunction) =>
       fn.addToRolePolicy(
         new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [parameterArn(SIGNING_SECRET_PARAM)] }),
       );
-      return fn;
-    };
 
     const authFunction = makeFunction("Auth", "auth/lambda.ts", {
       // scrypt needs about 128 MB per hash; more memory also means more CPU, so hashing is faster.
@@ -51,16 +52,15 @@ export class LedgerStack extends Stack {
       environment: { USERS_TABLE: usersTable.tableName },
     });
     usersTable.grantReadWriteData(authFunction);
+    canReadSigningSecret(authFunction);
 
-    const authorizer = new HttpLambdaAuthorizer(
-      "BearerAuthorizer",
-      makeFunction("Authorizer", "auth/authorizer-lambda.ts", { memorySize: 256 }),
-      {
-        responseTypes: [HttpLambdaResponseType.SIMPLE],
-        // An expired token can keep working for at most this long after it expires.
-        resultsCacheTtl: Duration.seconds(60),
-      },
-    );
+    const authorizerFunction = makeFunction("Authorizer", "auth/authorizer-lambda.ts", { memorySize: 256 });
+    canReadSigningSecret(authorizerFunction);
+    const authorizer = new HttpLambdaAuthorizer("BearerAuthorizer", authorizerFunction, {
+      responseTypes: [HttpLambdaResponseType.SIMPLE],
+      // An expired token can keep working for at most this long after it expires.
+      resultsCacheTtl: Duration.seconds(60),
+    });
 
     // Creates the signing secret, the admin password and the admin user on first deploy.
     const bootstrapFunction = makeFunction("Bootstrap", "bootstrap/lambda.ts", {
