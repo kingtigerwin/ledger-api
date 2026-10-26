@@ -18,6 +18,16 @@ const credentialsSchema = z.object({
   password: z.string().min(1).max(1024),
 });
 
+const loginSchema = credentialsSchema.extend({
+  // Browsers get the refresh token only as an HttpOnly cookie; non-browser clients (an agent) ask for it in the body.
+  refreshTokenIn: z.enum(["cookie", "body"]).default("cookie"),
+});
+
+/** Sends the refresh token the way the client asked: as a cookie, or in the JSON body. */
+function withRefreshToken(body: Record<string, unknown>, refreshToken: string, deliverIn: "cookie" | "body") {
+  return deliverIn === "body" ? json(200, { ...body, refreshToken }) : json(200, body, [refreshCookie(refreshToken)]);
+}
+
 export function createAuthHandler(deps: AuthDeps) {
   const users = createUsersStore(deps.tableName);
   const dummyHash = hashPassword("not-a-real-password");
@@ -41,7 +51,7 @@ export function createAuthHandler(deps: AuthDeps) {
         }
       }
       case "POST /api/v1/auth/login": {
-        const { username, password } = parseBody(event, credentialsSchema);
+        const { username, password, refreshTokenIn } = parseBody(event, loginSchema);
         const now = deps.now();
         const found = await users.findByUsername(username);
         if (found?.lockedUntil && new Date(found.lockedUntil) > now) {
@@ -64,7 +74,7 @@ export function createAuthHandler(deps: AuthDeps) {
           now,
         );
         const refreshToken = generateRefreshToken(found.user.id);
-        return json(200, { accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS }, [refreshCookie(refreshToken)]);
+        return withRefreshToken({ accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS }, refreshToken, refreshTokenIn);
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);
