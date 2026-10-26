@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ApiError, json, parseBody, withErrors } from "../http";
 import { hashPassword, verifyPassword } from "./password";
+import { ACCESS_TOKEN_TTL_SECONDS, signAccessToken } from "./tokens";
 import { createUsersStore, UsernameTakenError } from "./users-store";
 
 export interface AuthDeps {
@@ -8,6 +9,8 @@ export interface AuthDeps {
   signingSecret: string;
   now: () => Date;
 }
+
+const CUSTOMER_SCOPE = "members:read members:write transactions:read transactions:write";
 
 const credentialsSchema = z.object({
   username: z.string().min(1).max(64).toLowerCase(),
@@ -44,7 +47,12 @@ export function createAuthHandler(deps: AuthDeps) {
         if (found.user.status === "pending") {
           throw new ApiError(403, "account_pending", "This account is waiting for admin approval");
         }
-        return json(200, {});
+        const accessToken = await signAccessToken(
+          { sub: found.user.id, role: found.user.role, scope: CUSTOMER_SCOPE },
+          deps.signingSecret,
+          deps.now(),
+        );
+        return json(200, { accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS });
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);

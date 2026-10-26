@@ -1,7 +1,7 @@
 import { jwtVerify, SignJWT } from "jose";
 import type { Role } from "./users-store";
 
-const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 
 export interface AccessClaims {
   sub: string;
