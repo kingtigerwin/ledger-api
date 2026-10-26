@@ -118,3 +118,41 @@ describe("GET /transactions", () => {
     });
   });
 });
+
+describe("GET /transactions/summary", () => {
+  describe("given a month", () => {
+    it("totals that month's spending by member and by category, largest first", async () => {
+      const res = await call(handler, "GET /api/v1/transactions/summary", undefined, {
+        auth: customer(HOUSE),
+        query: { month: "2026-10" },
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        month: "2026-10",
+        currency: "AUD",
+        totalCents: 14000,
+        byMember: [
+          { memberId: dad, memberName: "dad", totalCents: 7000 },
+          { memberId: mom, memberName: "mom", totalCents: 7000 },
+        ],
+        byCategory: [
+          { category: "groceries", totalCents: 9000 },
+          { category: "dining", totalCents: 3000 },
+          { category: "transport", totalCents: 2000 },
+        ],
+      });
+    });
+  });
+
+  describe("given a malformed month", () => {
+    it("rejects it", async () => {
+      const res = await call(handler, "GET /api/v1/transactions/summary", undefined, {
+        auth: customer(HOUSE),
+        query: { month: "2026-13" },
+      });
+
+      expect(res.status).toBe(400);
+    });
+  });
+});
