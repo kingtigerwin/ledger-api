@@ -16,9 +16,11 @@
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1156.0",
+    "@aws-sdk/client-ssm": "^3.1156.0",
     "@aws-sdk/lib-dynamodb": "^3.1156.0",
     "aws-cdk-lib": "^2.274.0",
     "constructs": "^10.8.1",
+    "jose": "^6.2.13",
     "zod": "^4.6.7"
   },
   "devDependencies": {
