@@ -13,6 +13,8 @@ export interface User {
   createdAt: string;
 }
 
+export class UsernameTakenError extends Error {}
+
 const profileKey = (id: string) => ({ pk: `USER#${id}`, sk: "PROFILE" });
 const usernameKey = (username: string) => ({ pk: `USERNAME#${username}`, sk: "USERNAME" });
 
@@ -27,26 +29,31 @@ export function createUsersStore(tableName: string) {
         status: input.status,
         createdAt: input.now.toISOString(),
       };
-      await ddb.send(
-        new TransactWriteCommand({
-          TransactItems: [
-            {
-              Put: {
-                TableName: tableName,
-                Item: { ...usernameKey(user.username), userId: user.id },
-                ConditionExpression: "attribute_not_exists(pk)",
+      try {
+        await ddb.send(
+          new TransactWriteCommand({
+            TransactItems: [
+              {
+                Put: {
+                  TableName: tableName,
+                  Item: { ...usernameKey(user.username), userId: user.id },
+                  ConditionExpression: "attribute_not_exists(pk)",
+                },
               },
-            },
-            {
-              Put: {
-                TableName: tableName,
-                Item: { ...profileKey(user.id), ...user, passwordHash: input.passwordHash },
+              {
+                Put: {
+                  TableName: tableName,
+                  Item: { ...profileKey(user.id), ...user, passwordHash: input.passwordHash },
+                },
               },
-            },
-          ],
-        }),
-    );
-    return user;
-  },
+            ],
+          }),
+        );
+      } catch (err) {
+        if (err instanceof Error && err.name === "TransactionCanceledException") throw new UsernameTakenError();
+        throw err;
+      }
+      return user;
+    },
   };
 }
