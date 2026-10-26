@@ -9,6 +9,7 @@ import { createUserWithStatus } from "../support/users";
 const LOGIN = "POST /api/v1/auth/login";
 const REFRESH = "POST /api/v1/auth/refresh";
 const LOGOUT = "POST /api/v1/auth/logout";
+const ME = "GET /api/v1/auth/me";
 
 let tableName: string;
 let handler: ReturnType<typeof createAuthHandler>;
@@ -141,6 +142,21 @@ describe("POST /auth/logout", () => {
       expect(res.status).toBe(204);
       expect(res.cookies[0]).toMatch(/^refreshToken=; .*Max-Age=0/);
       expect(refresh.status).toBe(401);
+    });
+  });
+});
+
+describe("GET /auth/me", () => {
+  describe("given a request the authorizer let through", () => {
+    it("returns the signed-in user", async () => {
+      const user = await createUserWithStatus(tableName, "quinn", "pw", "active");
+
+      const res = await call(handler, ME, undefined, {
+        auth: { userId: user.id, role: "customer", scope: "members:read" },
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ id: user.id, username: "quinn", role: "customer", status: "active" });
     });
   });
 });
