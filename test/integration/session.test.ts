@@ -80,4 +80,20 @@ describe("POST /auth/refresh", () => {
       expect(res.cookies).toEqual([]);
     });
   });
+
+  describe("given a refresh token that was already replaced", () => {
+    it("refuses it and revokes the user's newer token too, since it was probably stolen", async () => {
+      await createUserWithStatus(tableName, "mia", "pw", "active");
+      const login = await call(handler, LOGIN, { username: "mia", password: "pw", refreshTokenIn: "body" });
+      const first = login.body.refreshToken;
+      const rotated = await call(handler, REFRESH, { refreshToken: first });
+
+      const replay = await call(handler, REFRESH, { refreshToken: first });
+      const afterReplay = await call(handler, REFRESH, { refreshToken: rotated.body.refreshToken });
+
+      expect(replay.status).toBe(401);
+      expect(replay.body.error.code).toBe("invalid_refresh_token");
+      expect(afterReplay.status).toBe(401);
+    });
+  });
 });
