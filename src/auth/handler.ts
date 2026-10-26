@@ -19,6 +19,7 @@ const credentialsSchema = z.object({
 
 export function createAuthHandler(deps: AuthDeps) {
   const users = createUsersStore(deps.tableName);
+  const dummyHash = hashPassword("not-a-real-password");
 
   return withErrors(async (event) => {
     switch (event.routeKey) {
@@ -45,9 +46,11 @@ export function createAuthHandler(deps: AuthDeps) {
         if (found?.lockedUntil && new Date(found.lockedUntil) > now) {
           throw new ApiError(423, "account_locked", "Too many failed logins; try again later");
         }
-        const passwordOk = found ? await verifyPassword(password, found.passwordHash) : false;
-        if (found && !passwordOk) await users.recordFailedLogin(found.user.id, now);
-        if (!found || !passwordOk || found.user.status === "disabled") {
+        // Hash even when the user doesn't exist, so response time doesn't reveal which usernames are taken.
+        const passwordOk = await verifyPassword(password, found?.passwordHash ?? (await dummyHash));
+        if (!found) throw new ApiError(401, "invalid_credentials", "Invalid username or password");
+        if (!passwordOk) await users.recordFailedLogin(found.user.id, now);
+        if (!passwordOk || found.user.status === "disabled") {
           throw new ApiError(401, "invalid_credentials", "Invalid username or password");
         }
         if (found.failedLogins > 0) await users.clearFailedLogins(found.user.id);
