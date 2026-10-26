@@ -117,6 +117,20 @@ describe("LedgerStack", () => {
     }
   });
 
+  it("puts the transaction routes and the admin's transaction view behind the authorizer", () => {
+    for (const routeKey of [
+      "POST /api/v1/transactions",
+      "GET /api/v1/transactions",
+      "GET /api/v1/transactions/summary",
+      "GET /api/v1/transactions/{id}",
+      "PATCH /api/v1/transactions/{id}",
+      "DELETE /api/v1/transactions/{id}",
+      "GET /api/v1/admin/users/{id}/transactions",
+    ]) {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: routeKey, AuthorizationType: "CUSTOM" });
+    }
+  });
+
   it("protects /auth/me and leaves the sign-in routes public", () => {
     template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
       RouteKey: "GET /api/v1/auth/me",
