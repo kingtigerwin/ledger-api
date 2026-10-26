@@ -32,6 +32,11 @@ export const createTransactionSchema = transactionFieldsSchema.extend({
   currency: z.literal("AUD"),
 });
 
+/** A partial edit, plus the version the client last read. */
+export const updateTransactionSchema = transactionFieldsSchema.partial().extend({
+  version: z.number().int().positive(),
+});
+
 export type TransactionFields = z.infer<typeof transactionFieldsSchema>;
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 

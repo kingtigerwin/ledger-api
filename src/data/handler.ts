@@ -2,8 +2,13 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { z } from "zod";
 import { ApiError, authContext, json, noContent, parseBody, requireAdmin, withErrors } from "../http";
 import { createMembersStore, MemberNameTakenError, MemberNotFoundError } from "./members-store";
-import { createTransactionSchema, type Transaction } from "./transaction-schema";
-import { createTransactionsStore, TransactionExistsError } from "./transactions-store";
+import { createTransactionSchema, type Transaction, updateTransactionSchema } from "./transaction-schema";
+import {
+  createTransactionsStore,
+  TransactionExistsError,
+  TransactionNotFoundError,
+  VersionConflictError,
+} from "./transactions-store";
 import { ulidTime } from "./ulid";
 
 // Client clocks drift a little; an ID from further ahead than this would distort the sort order.
@@ -103,6 +108,21 @@ export function createDataHandler(deps: DataDeps) {
         const transaction = await transactions.get(userId, event.pathParameters?.id ?? "");
         if (!transaction) throw new ApiError(404, "transaction_not_found", "No such transaction");
         return json(200, await withMemberName(userId, transaction));
+      }
+      case "PATCH /api/v1/transactions/{id}": {
+        const userId = requireScope(event, "transactions:write");
+        const { version, ...changes } = parseBody(event, updateTransactionSchema);
+        if (changes.memberId) await requireMember(userId, changes.memberId);
+        try {
+          const updated = await transactions.update(userId, event.pathParameters?.id ?? "", version, changes, deps.now());
+          return json(200, await withMemberName(userId, updated));
+        } catch (err) {
+          if (err instanceof TransactionNotFoundError) throw new ApiError(404, "transaction_not_found", "No such transaction");
+          if (err instanceof VersionConflictError) {
+            throw new ApiError(409, "version_conflict", "Someone else changed this transaction; reload it and try again");
+          }
+          throw err;
+        }
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);
