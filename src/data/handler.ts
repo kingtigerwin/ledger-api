@@ -231,6 +231,10 @@ export function createDataHandler(deps: DataDeps) {
         const userId = requireScope(event, "transactions:read");
         return json(200, await monthSummary(userId, parseQuery(event, summaryQuerySchema).month));
       }
+      case "GET /api/v1/admin/users/{id}/transactions": {
+        requireAdmin(event, "admin:read");
+        return json(200, await listPage(event.pathParameters?.id ?? "", event));
+      }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);
     }
