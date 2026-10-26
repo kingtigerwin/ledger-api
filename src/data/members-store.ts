@@ -4,6 +4,7 @@ import {
   QueryCommand,
   type QueryCommandOutput,
   TransactWriteCommand,
+  UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../db-client";
 
@@ -99,6 +100,26 @@ export function createMembersStore(tableName: string) {
         throw new MemberNotFoundError();
       }
       return { ...current, name, updatedAt: now.toISOString() };
+    },
+
+    /** Hides the member from new transactions while keeping their name on old ones. */
+    async archive(userId: string, memberId: string, now: Date): Promise<Member> {
+      try {
+        const { Attributes } = await ddb.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: memberKey(userId, memberId),
+            UpdateExpression: "SET archived = :true, updatedAt = :now",
+            ConditionExpression: "attribute_exists(pk)",
+            ExpressionAttributeValues: { ":true": true, ":now": now.toISOString() },
+            ReturnValues: "ALL_NEW",
+          }),
+        );
+        return toMember(Attributes!);
+      } catch (err) {
+        if (err instanceof Error && err.name === "ConditionalCheckFailedException") throw new MemberNotFoundError();
+        throw err;
+      }
     },
 
     /** Deletes the member and frees their name. */
