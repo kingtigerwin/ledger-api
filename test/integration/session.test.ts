@@ -36,4 +36,16 @@ describe("POST /auth/login", () => {
       expect(res.cookies[0]).toContain("Max-Age=604800");
     });
   });
+
+  describe("given a client that asks for the refresh token in the body", () => {
+    it("returns it in the body and sets no cookie", async () => {
+      await createUserWithStatus(tableName, "judy", "pw", "active");
+
+      const res = await call(handler, LOGIN, { username: "judy", password: "pw", refreshTokenIn: "body" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.refreshToken).toEqual(expect.any(String));
+      expect(res.cookies).toEqual([]);
+    });
+  });
 });
