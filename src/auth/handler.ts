@@ -40,21 +40,24 @@ export function createAuthHandler(deps: AuthDeps) {
       }
       case "POST /api/v1/auth/login": {
         const { username, password } = parseBody(event, credentialsSchema);
+        const now = deps.now();
         const found = await users.findByUsername(username);
-        if (
-          !found ||
-          !(await verifyPassword(password, found.passwordHash)) ||
-          found.user.status === "disabled"
-        ) {
+        if (found?.lockedUntil && new Date(found.lockedUntil) > now) {
+          throw new ApiError(423, "account_locked", "Too many failed logins; try again later");
+        }
+        const passwordOk = found ? await verifyPassword(password, found.passwordHash) : false;
+        if (found && !passwordOk) await users.recordFailedLogin(found.user.id, now);
+        if (!found || !passwordOk || found.user.status === "disabled") {
           throw new ApiError(401, "invalid_credentials", "Invalid username or password");
         }
+        if (found.failedLogins > 0) await users.clearFailedLogins(found.user.id);
         if (found.user.status === "pending") {
           throw new ApiError(403, "account_pending", "This account is waiting for admin approval");
         }
         const accessToken = await signAccessToken(
           { sub: found.user.id, role: found.user.role, scope: CUSTOMER_SCOPE },
           deps.signingSecret,
-          deps.now(),
+          now,
         );
         return json(200, { accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS });
       }
