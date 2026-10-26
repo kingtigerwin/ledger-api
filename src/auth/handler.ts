@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ApiError, json, parseBody, withErrors } from "../http";
-import { hashPassword } from "./password";
+import { hashPassword, verifyPassword } from "./password";
 import { createUsersStore, UsernameTakenError } from "./users-store";
 
 export interface AuthDeps {
@@ -34,6 +34,17 @@ export function createAuthHandler(deps: AuthDeps) {
           if (err instanceof UsernameTakenError) throw new ApiError(409, "username_taken", "That username is taken");
           throw err;
         }
+      }
+      case "POST /api/v1/auth/login": {
+        const { username, password } = parseBody(event, credentialsSchema);
+        const found = await users.findByUsername(username);
+        if (!found || !(await verifyPassword(password, found.passwordHash))) {
+          throw new ApiError(401, "invalid_credentials", "Invalid username or password");
+        }
+        if (found.user.status === "pending") {
+          throw new ApiError(403, "account_pending", "This account is waiting for admin approval");
+        }
+        return json(200, {});
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);

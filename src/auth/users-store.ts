@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../db-client";
 
 export type Role = "admin" | "customer";
@@ -54,6 +54,19 @@ export function createUsersStore(tableName: string) {
         throw err;
       }
       return user;
+    },
+
+    async findByUsername(username: string): Promise<{ user: User; passwordHash: string } | undefined> {
+      const { Item: claim } = await ddb.send(
+        new GetCommand({ TableName: tableName, Key: usernameKey(username), ConsistentRead: true }),
+      );
+      if (!claim) return undefined;
+      const { Item } = await ddb.send(
+        new GetCommand({ TableName: tableName, Key: profileKey(claim.userId as string), ConsistentRead: true }),
+      );
+      if (!Item) return undefined;
+      const { id, role, status, createdAt, passwordHash } = Item;
+      return { user: { id, username: Item.username, role, status, createdAt }, passwordHash };
     },
   };
 }
