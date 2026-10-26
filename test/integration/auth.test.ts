@@ -144,4 +144,16 @@ describe("POST /auth/login", () => {
       expect(res.status).toBe(200);
     });
   });
+
+  describe("given an active admin", () => {
+    it("issues admin scopes and no customer scopes", async () => {
+      await createUserWithStatus(tableName, "boss", "pw", "active", "admin");
+
+      const res = await call(handler, LOGIN, { username: "boss", password: "pw" });
+
+      const claims = await verifyAccessToken(res.body.accessToken, "test-secret", new Date());
+      expect(claims.role).toBe("admin");
+      expect(claims.scope.split(" ").sort()).toEqual(["admin:read", "admin:write"]);
+    });
+  });
 });
