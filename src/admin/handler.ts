@@ -1,13 +1,12 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
-import { z } from "zod";
 import { createUsersStore, UserNotFoundError, type UserStatus } from "../auth/users-store";
 import { ApiError, json, requireAdmin, withErrors } from "../http";
+import { statusQuery } from "./schemas";
 
 export interface AdminDeps {
   tableName: string;
 }
 
-const statusQuery = z.object({ status: z.enum(["pending", "active", "disabled"]) });
 
 export function createAdminHandler(deps: AdminDeps) {
   const users = createUsersStore(deps.tableName);

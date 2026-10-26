@@ -5,6 +5,7 @@ import type {
 } from "aws-lambda";
 import type { z } from "zod";
 import type { AuthContext } from "./auth/authorizer";
+import { log } from "./log";
 
 export type Handler = (event: APIGatewayProxyEventV2) => Promise<APIGatewayProxyResultV2>;
 
@@ -71,7 +72,7 @@ export function withErrors(handler: Handler): Handler {
       if (err instanceof ApiError) {
         return json(err.status, { error: { code: err.code, message: err.message, details: err.details } });
       }
-      console.error("Unhandled error", { routeKey: event.routeKey, err });
+      log({ event: "unhandled_error", routeKey: event.routeKey, err }, "error");
       return json(500, { error: { code: "internal_error", message: "Internal server error" } });
     }
   };

@@ -143,4 +143,40 @@ describe("LedgerStack", () => {
       });
     }
   });
+
+  it("serves /api/* through CloudFront with caching off and auth headers and cookies forwarded", () => {
+    template.hasResourceProperties("AWS::CloudFront::Distribution", {
+      DistributionConfig: Match.objectLike({
+        CacheBehaviors: [
+          Match.objectLike({
+            PathPattern: "/api/*",
+            ViewerProtocolPolicy: "redirect-to-https",
+            // AWS managed policies: CachingDisabled and AllViewerExceptHostHeader.
+            CachePolicyId: "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+            OriginRequestPolicyId: "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+            AllowedMethods: Match.arrayWith(["GET", "PATCH", "POST", "DELETE"]), // arrayWith matches in order
+          }),
+        ],
+      }),
+    });
+  });
+
+  it("has four free-tier alarms that notify an SNS topic", () => {
+    const alarms = Object.values(template.findResources("AWS::CloudWatch::Alarm"));
+
+    expect(alarms).toHaveLength(4);
+    for (const alarm of alarms) expect(alarm.Properties.AlarmActions).toHaveLength(1);
+    template.hasResourceProperties("AWS::Logs::MetricFilter", { FilterPattern: '{ $.event = "login_failed" }' });
+  });
+
+  it("subscribes no email when alarmEmail isn't set", () => {
+    template.resourceCountIs("AWS::SNS::Subscription", 0);
+  });
+
+  it("subscribes the alarmEmail context value", () => {
+    const app = new App({ context: { alarmEmail: "me@example.com" } });
+    const withEmail = Template.fromStack(new LedgerStack(app, "LedgerApi", { env: { region: "ap-southeast-2" } }));
+
+    withEmail.hasResourceProperties("AWS::SNS::Subscription", { Protocol: "email", Endpoint: "me@example.com" });
+  });
 });

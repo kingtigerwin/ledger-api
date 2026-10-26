@@ -12,7 +12,8 @@
     "db:down": "docker compose down",
     "synth": "cdk synth",
     "diff": "cdk diff",
-    "deploy": "cdk deploy"
+    "deploy": "cdk deploy",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1156.0",

@@ -1,6 +1,7 @@
-import { z } from "zod";
 import { ApiError, authContext, json, noContent, parseBody, withErrors } from "../http";
+import { log as defaultLog, type Logger } from "../log";
 import { hashPassword, verifyPassword } from "./password";
+import { credentialsSchema, loginSchema } from "./schemas";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import {
   clearRefreshCookie,
@@ -16,6 +17,7 @@ export interface AuthDeps {
   tableName: string;
   signingSecret: string;
   now: () => Date;
+  log?: Logger;
 }
 
 // Admins manage users and read data; they have no household of their own.
@@ -24,15 +26,7 @@ const SCOPES: Record<Role, string> = {
   admin: "admin:read admin:write",
 };
 
-const credentialsSchema = z.object({
-  username: z.string().min(1).max(64).toLowerCase(),
-  password: z.string().min(1).max(1024),
-});
 
-const loginSchema = credentialsSchema.extend({
-  // Browsers get the refresh token only as an HttpOnly cookie; non-browser clients (an agent) ask for it in the body.
-  refreshTokenIn: z.enum(["cookie", "body"]).default("cookie"),
-});
 
 type Delivery = "cookie" | "body";
 
@@ -59,6 +53,15 @@ function readRefreshToken(event: APIGatewayProxyEventV2): { token: string; deliv
 export function createAuthHandler(deps: AuthDeps) {
   const users = createUsersStore(deps.tableName);
   const dummyHash = hashPassword("not-a-real-password");
+  const log = deps.log ?? defaultLog;
+
+  /** A failed login: logged for the failed-login alarm, then returned to the client. */
+  const loginFailed = (reason: "invalid_credentials" | "account_locked") => {
+    log({ event: "login_failed", reason });
+    return reason === "account_locked"
+      ? new ApiError(423, "account_locked", "Too many failed logins; try again later")
+      : new ApiError(401, "invalid_credentials", "Invalid username or password");
+  };
 
   const accessTokenFor = (user: User, now: Date) =>
     signAccessToken({ sub: user.id, role: user.role, scope: SCOPES[user.role] }, deps.signingSecret, now);
@@ -87,15 +90,13 @@ export function createAuthHandler(deps: AuthDeps) {
         const now = deps.now();
         const found = await users.findByUsername(username);
         if (found?.lockedUntil && new Date(found.lockedUntil) > now) {
-          throw new ApiError(423, "account_locked", "Too many failed logins; try again later");
+          throw loginFailed("account_locked");
         }
         // Hash even when the user doesn't exist, so response time doesn't reveal which usernames are taken.
         const passwordOk = await verifyPassword(password, found?.passwordHash ?? (await dummyHash));
-        if (!found) throw new ApiError(401, "invalid_credentials", "Invalid username or password");
+        if (!found) throw loginFailed("invalid_credentials");
         if (!passwordOk) await users.recordFailedLogin(found.user.id, now);
-        if (!passwordOk || found.user.status === "disabled") {
-          throw new ApiError(401, "invalid_credentials", "Invalid username or password");
-        }
+        if (!passwordOk || found.user.status === "disabled") throw loginFailed("invalid_credentials");
         if (found.failedLogins > 0) await users.clearFailedLogins(found.user.id);
         if (found.user.status === "pending") {
           throw new ApiError(403, "account_pending", "This account is waiting for admin approval");

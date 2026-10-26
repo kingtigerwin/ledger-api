@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["bin", "lib", "src", "test", "vitest.config.mts"]
+  "include": ["bin", "lib", "src", "test", "scripts", "vitest.config.mts"]
 }
