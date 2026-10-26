@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { ApiError, json, parseBody, withErrors } from "../http";
+import { ApiError, json, noContent, parseBody, withErrors } from "../http";
 import { hashPassword, verifyPassword } from "./password";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import {
+  clearRefreshCookie,
   generateRefreshToken,
   hashRefreshToken,
   REFRESH_TOKEN_TTL_SECONDS,
@@ -116,6 +117,19 @@ export function createAuthHandler(deps: AuthDeps) {
         }
         const accessToken = await accessTokenFor(user, now);
         return withRefreshToken({ accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS }, next, deliverIn);
+      }
+      case "POST /api/v1/auth/logout": {
+        // Logging out twice, or without a token, is still a successful logout.
+        const found = (() => {
+          try {
+            return readRefreshToken(event);
+          } catch {
+            return undefined;
+          }
+        })();
+        const userId = found?.token.split(".")[0];
+        if (found && userId) await users.deleteRefreshToken(userId, hashRefreshToken(found.token));
+        return noContent([clearRefreshCookie()]);
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);

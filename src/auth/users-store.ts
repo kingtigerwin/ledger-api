@@ -177,6 +177,10 @@ export function createUsersStore(tableName: string) {
       }
     },
 
+    async deleteRefreshToken(userId: string, tokenHash: string): Promise<void> {
+      await ddb.send(new DeleteCommand({ TableName: tableName, Key: refreshTokenKey(userId, tokenHash) }));
+    },
+
     /** Deletes every refresh token the user has, logging them out everywhere within one access-token lifetime. */
     async revokeRefreshTokens(userId: string): Promise<void> {
       let startKey: Record<string, unknown> | undefined;
