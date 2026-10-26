@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createAuthHandler } from "../../src/auth/handler";
+import type { LogEntry } from "../../src/log";
 import { verifyAccessToken } from "../../src/auth/tokens";
 import { createUsersTable, deleteTable } from "../support/dynamo";
 import { call } from "../support/http";
@@ -154,6 +155,26 @@ describe("POST /auth/login", () => {
       const claims = await verifyAccessToken(res.body.accessToken, "test-secret", new Date());
       expect(claims.role).toBe("admin");
       expect(claims.scope.split(" ").sort()).toEqual(["admin:read", "admin:write"]);
+    });
+  });
+});
+
+describe("logging", () => {
+  describe("given a failed login", () => {
+    it("logs a login_failed event for the alarm, without the password", async () => {
+      const entries: LogEntry[] = [];
+      const logged = createAuthHandler({
+        tableName,
+        signingSecret: "test-secret",
+        now: () => new Date(),
+        log: (entry) => entries.push(entry),
+      });
+      await createUserWithStatus(tableName, "ivy", "pw", "active");
+
+      await call(logged, LOGIN, { username: "ivy", password: "wrong" });
+
+      expect(entries).toContainEqual({ event: "login_failed", reason: "invalid_credentials" });
+      expect(JSON.stringify(entries)).not.toContain("wrong");
     });
   });
 });
