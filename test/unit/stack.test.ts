@@ -36,12 +36,44 @@ describe("LedgerStack", () => {
   });
 
   it("throttles the API, and the auth routes more tightly", () => {
+    const tight = { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 };
     template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
       DefaultRouteSettings: { ThrottlingRateLimit: 50, ThrottlingBurstLimit: 100 },
       RouteSettings: {
-        "POST /api/v1/auth/register": { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 },
-        "POST /api/v1/auth/login": { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 },
+        "POST /api/v1/auth/register": tight,
+        "POST /api/v1/auth/login": tight,
+        "POST /api/v1/auth/refresh": tight,
+        "POST /api/v1/auth/logout": tight,
       },
     });
+  });
+
+  it("lets DynamoDB delete expired refresh tokens", () => {
+    template.hasResourceProperties("AWS::DynamoDB::GlobalTable", {
+      TimeToLiveSpecification: { AttributeName: "ttl", Enabled: true },
+    });
+  });
+
+  it("has a Lambda authorizer that reads the bearer token and caches for 60 seconds", () => {
+    template.hasResourceProperties("AWS::ApiGatewayV2::Authorizer", {
+      AuthorizerType: "REQUEST",
+      AuthorizerPayloadFormatVersion: "2.0",
+      EnableSimpleResponses: true,
+      IdentitySource: ["$request.header.Authorization"],
+      AuthorizerResultTtlInSeconds: 60,
+    });
+  });
+
+  it("protects /auth/me and leaves the sign-in routes public", () => {
+    template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
+      RouteKey: "GET /api/v1/auth/me",
+      AuthorizationType: "CUSTOM",
+    });
+    for (const route of ["register", "login", "refresh", "logout"]) {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
+        RouteKey: `POST /api/v1/auth/${route}`,
+        AuthorizationType: "NONE",
+      });
+    }
   });
 });
