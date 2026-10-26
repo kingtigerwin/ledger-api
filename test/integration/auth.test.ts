@@ -13,12 +13,12 @@ let tableName: string;
 let handler: ReturnType<typeof createAuthHandler>;
 
 // Stands in for admin approval until the enable endpoint exists (Stage 3).
-async function createActiveUser(username: string, password: string) {
+async function createUserWithStatus(username: string, password: string, status: "active" | "disabled") {
   return createUsersStore(tableName).create({
     username,
     passwordHash: await hashPassword(password),
     role: "customer",
-    status: "active",
+    status,
     now: new Date(),
   });
 }
@@ -102,7 +102,7 @@ describe("POST /auth/login", () => {
 
   describe("given an active user with the correct password", () => {
     it("returns an access token for that customer", async () => {
-      const user = await createActiveUser("frank", "pw");
+      const user = await createUserWithStatus("frank", "pw", "active");
 
       const res = await call(handler, LOGIN, { username: "Frank", password: "pw" });
 
@@ -114,6 +114,17 @@ describe("POST /auth/login", () => {
         expect.arrayContaining(["members:read", "members:write", "transactions:read", "transactions:write"]),
       );
       expect(res.body.expiresIn).toBe(900);
+    });
+  });
+
+  describe("given a disabled user with the correct password", () => {
+    it("refuses with the same invalid_credentials error", async () => {
+      await createUserWithStatus("grace", "pw", "disabled");
+
+      const res = await call(handler, LOGIN, { username: "grace", password: "pw" });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe("invalid_credentials");
     });
   });
 });
