@@ -223,3 +223,56 @@ describe("DELETE /transactions/{id}", () => {
     });
   });
 });
+
+describe("archived members", () => {
+  const deleteMember = (house: string, id: string) =>
+    call(handler, "DELETE /api/v1/members/{id}", undefined, { auth: customer(house), params: { id } });
+
+  describe("given a member with transactions is deleted", () => {
+    it("archives them instead, and their transactions keep the name", async () => {
+      const mum = await addMember("tx-house-n", "mum");
+      const body = expense(mum);
+      await create("tx-house-n", body);
+
+      const res = await deleteMember("tx-house-n", mum);
+      const members = await call(handler, "GET /api/v1/members", undefined, { auth: customer("tx-house-n") });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id: mum, archived: true });
+      expect(members.body.items).toEqual([expect.objectContaining({ id: mum, archived: true })]);
+      expect((await get("tx-house-n", body.id)).body.memberName).toBe("mum");
+    });
+  });
+
+  describe("given an archived member", () => {
+    it("can't be used on a new transaction or an edit", async () => {
+      const old = await addMember("tx-house-o", "old");
+      const current = await addMember("tx-house-o", "current");
+      const kept = expense(old);
+      await create("tx-house-o", kept);
+      const other = expense(current);
+      await create("tx-house-o", other);
+      await deleteMember("tx-house-o", old);
+
+      const created = await create("tx-house-o", expense(old));
+      const edited = await patch("tx-house-o", other.id, { version: 1, memberId: old });
+
+      expect(created.status).toBe(422);
+      expect(created.body.error.code).toBe("member_archived");
+      expect(edited.status).toBe(422);
+      expect(edited.body.error.code).toBe("member_archived");
+    });
+
+    it("still lets a retried create return the original record", async () => {
+      const gran = await addMember("tx-house-p", "gran");
+      const body = expense(gran);
+      const first = await create("tx-house-p", body);
+      await deleteMember("tx-house-p", gran);
+
+      const retry = await create("tx-house-p", body);
+
+      expect(retry.status).toBe(200);
+      expect(retry.body).toEqual(first.body);
+    });
+  });
+});
