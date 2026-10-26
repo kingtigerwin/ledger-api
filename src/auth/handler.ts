@@ -41,7 +41,11 @@ export function createAuthHandler(deps: AuthDeps) {
       case "POST /api/v1/auth/login": {
         const { username, password } = parseBody(event, credentialsSchema);
         const found = await users.findByUsername(username);
-        if (!found || !(await verifyPassword(password, found.passwordHash))) {
+        if (
+          !found ||
+          !(await verifyPassword(password, found.passwordHash)) ||
+          found.user.status === "disabled"
+        ) {
           throw new ApiError(401, "invalid_credentials", "Invalid username or password");
         }
         if (found.user.status === "pending") {
