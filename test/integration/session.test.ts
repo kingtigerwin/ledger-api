@@ -96,4 +96,19 @@ describe("POST /auth/refresh", () => {
       expect(afterReplay.status).toBe(401);
     });
   });
+
+  describe("given a refresh token older than 7 days", () => {
+    it("refuses it, even if DynamoDB hasn't deleted it yet", async () => {
+      let now = new Date("2026-10-01T09:00:00Z");
+      const clocked = createAuthHandler({ tableName, signingSecret: "test-secret", now: () => now });
+      await createUserWithStatus(tableName, "noah", "pw", "active");
+      const login = await call(clocked, LOGIN, { username: "noah", password: "pw", refreshTokenIn: "body" });
+
+      now = new Date("2026-10-08T09:00:01Z");
+      const res = await call(clocked, REFRESH, { refreshToken: login.body.refreshToken });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe("invalid_refresh_token");
+    });
+  });
 });
