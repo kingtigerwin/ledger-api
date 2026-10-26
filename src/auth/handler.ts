@@ -105,7 +105,7 @@ export function createAuthHandler(deps: AuthDeps) {
         const { token, deliverIn } = readRefreshToken(event);
         const [userId] = token.split(".");
         const user = userId ? await users.getById(userId) : undefined;
-        if (!user) throw invalidRefreshToken();
+        if (user?.status !== "active") throw invalidRefreshToken();
         const next = generateRefreshToken(user.id);
         try {
           await users.rotateRefreshToken(user.id, hashRefreshToken(token), hashRefreshToken(next), now, refreshExpiry(now));
