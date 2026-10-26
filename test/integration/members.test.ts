@@ -110,3 +110,38 @@ describe("PATCH /members/{id}", () => {
     });
   });
 });
+
+describe("DELETE /members/{id}", () => {
+  describe("given a member with no transactions", () => {
+    it("deletes them and frees the name", async () => {
+      const temp = await call(handler, "POST /api/v1/members", { name: "Temp" }, { auth: customer("house-j") });
+
+      const res = await call(handler, "DELETE /api/v1/members/{id}", undefined, {
+        auth: customer("house-j"),
+        params: { id: temp.body.id },
+      });
+      const list = await call(handler, "GET /api/v1/members", undefined, { auth: customer("house-j") });
+      const reuse = await call(handler, "POST /api/v1/members", { name: "temp" }, { auth: customer("house-j") });
+
+      expect(res.status).toBe(204);
+      expect(list.body.items.map((m: { id: string }) => m.id)).not.toContain(temp.body.id);
+      expect(reuse.status).toBe(201);
+    });
+  });
+
+  describe("given another household's member", () => {
+    it("returns 404 and leaves the member alone", async () => {
+      const theirs = await call(handler, "POST /api/v1/members", { name: "Cousin" }, { auth: customer("house-k") });
+
+      const res = await call(handler, "DELETE /api/v1/members/{id}", undefined, {
+        auth: customer("house-l"),
+        params: { id: theirs.body.id },
+      });
+      const list = await call(handler, "GET /api/v1/members", undefined, { auth: customer("house-k") });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe("member_not_found");
+      expect(list.body.items).toHaveLength(1);
+    });
+  });
+});
