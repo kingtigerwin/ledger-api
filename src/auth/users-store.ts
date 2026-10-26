@@ -27,6 +27,7 @@ export interface User {
 }
 
 export class UsernameTakenError extends Error {}
+export class UserNotFoundError extends Error {}
 
 export class InvalidRefreshTokenError extends Error {
   /** True when the token existed but had already been replaced: a sign it was copied. */
@@ -159,17 +160,25 @@ export function createUsersStore(tableName: string) {
       return { id, username, role, status, createdAt };
     },
 
-    async setStatus(userId: string, status: UserStatus): Promise<void> {
-      await ddb.send(
-        new UpdateCommand({
-          TableName: tableName,
-          Key: profileKey(userId),
-          UpdateExpression: "SET #status = :status",
-          ConditionExpression: "attribute_exists(pk)",
-          ExpressionAttributeNames: { "#status": "status" },
-          ExpressionAttributeValues: { ":status": status },
-        }),
-      );
+    async setStatus(userId: string, status: UserStatus): Promise<User> {
+      try {
+        const { Attributes } = await ddb.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: profileKey(userId),
+            UpdateExpression: "SET #status = :status",
+            ConditionExpression: "attribute_exists(pk)",
+            ExpressionAttributeNames: { "#status": "status" },
+            ExpressionAttributeValues: { ":status": status },
+            ReturnValues: "ALL_NEW",
+          }),
+        );
+        const { id, username, role, createdAt } = Attributes!;
+        return { id, username, role, status, createdAt };
+      } catch (err) {
+        if (err instanceof Error && err.name === "ConditionalCheckFailedException") throw new UserNotFoundError();
+        throw err;
+      }
     },
 
     async saveRefreshToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
