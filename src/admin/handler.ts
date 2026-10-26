@@ -42,6 +42,16 @@ export function createAdminHandler(deps: AdminDeps) {
         requireAdmin(event, "admin:write");
         return json(200, await setStatus(event, "active"));
       }
+      case "POST /api/v1/admin/users/{id}/disable": {
+        requireAdmin(event, "admin:write");
+        const target = await users.getById(event.pathParameters?.id ?? "");
+        if (!target) throw new ApiError(404, "user_not_found", "No such user");
+        if (target.role === "admin") throw new ApiError(409, "cannot_disable_admin", "Admins can't be disabled");
+        const user = await setStatus(event, "disabled");
+        // Their access token still works until it expires (at most 15 minutes); refreshing ends now.
+        await users.revokeRefreshTokens(user.id);
+        return json(200, user);
+      }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);
     }
