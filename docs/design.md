@@ -39,7 +39,10 @@ A public API where household customers record their spending. It's a learning an
 
 A customer-managed list of household members (e.g. "mom"). Transactions store the member's generated ID; the display name lives on the member, so renaming never touches transactions.
 
-- Deleting a member with transactions archives it (hidden from new transactions, kept on old ones). A member without transactions is deleted outright.
+- Names are 1–50 characters and unique within a household, case-insensitively (409 `member_name_taken`), enforced by a `MEMBERNAME#<lowercase>` claim item written in the same transaction. Another household can use the same name.
+- `GET /members` returns every member with an `archived` flag, sorted by name; the UI hides archived ones from the dropdown.
+- Deleting a member with transactions archives it (hidden from new transactions, kept on old ones). A member without transactions is deleted outright and their name is freed. "Has transactions" is a `Limit: 1` query on the by-member index.
+- Another household's member is reported as 404 `member_not_found`, never 403, so IDs reveal nothing.
 
 ### Transaction
 
