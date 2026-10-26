@@ -28,7 +28,7 @@ export interface DataDeps {
   now: () => Date;
 }
 
-const memberSchema = z.object({ name: z.string().trim().min(1).max(50) });
+export const memberSchema = z.object({ name: z.string().trim().min(1).max(50) });
 
 /** The caller's user ID, provided their token carries the scope this route needs. */
 function requireScope(event: APIGatewayProxyEventV2, scope: string): string {

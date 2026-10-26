@@ -104,12 +104,19 @@ export class LedgerStack extends Stack {
     dataTable.grantReadWriteData(dataFunction);
     canReadSigningSecret(dataFunction);
 
+    const docsFunction = makeFunction("Docs", "docs/lambda.ts", { memorySize: 128 });
+
     const api = new HttpApi(this, "Api", { createDefaultStage: false });
     const auth = new HttpLambdaIntegration("AuthIntegration", authFunction);
     const publicRoutes = PUBLIC_AUTH_ROUTES.flatMap((routePath) =>
       api.addRoutes({ path: routePath, methods: [HttpMethod.POST], integration: auth }),
     );
     api.addRoutes({ path: "/api/v1/auth/me", methods: [HttpMethod.GET], integration: auth, authorizer });
+    api.addRoutes({
+      path: "/api/openapi.json",
+      methods: [HttpMethod.GET],
+      integration: new HttpLambdaIntegration("DocsIntegration", docsFunction),
+    });
     const data = new HttpLambdaIntegration("DataIntegration", dataFunction);
     const dataRoutes: [string, HttpMethod[]][] = [
       ["/api/v1/members", [HttpMethod.POST, HttpMethod.GET]],

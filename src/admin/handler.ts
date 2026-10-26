@@ -7,7 +7,7 @@ export interface AdminDeps {
   tableName: string;
 }
 
-const statusQuery = z.object({ status: z.enum(["pending", "active", "disabled"]) });
+export const statusQuery = z.object({ status: z.enum(["pending", "active", "disabled"]) });
 
 export function createAdminHandler(deps: AdminDeps) {
   const users = createUsersStore(deps.tableName);

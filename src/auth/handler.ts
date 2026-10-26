@@ -26,12 +26,12 @@ const SCOPES: Record<Role, string> = {
   admin: "admin:read admin:write",
 };
 
-const credentialsSchema = z.object({
+export const credentialsSchema = z.object({
   username: z.string().min(1).max(64).toLowerCase(),
   password: z.string().min(1).max(1024),
 });
 
-const loginSchema = credentialsSchema.extend({
+export const loginSchema = credentialsSchema.extend({
   // Browsers get the refresh token only as an HttpOnly cookie; non-browser clients (an agent) ask for it in the body.
   refreshTokenIn: z.enum(["cookie", "body"]).default("cookie"),
 });
