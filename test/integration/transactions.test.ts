@@ -96,4 +96,39 @@ describe("POST /transactions and GET /transactions/{id}", () => {
       expect((await get("tx-house-d", body.id)).body.amountCents).toBe(10000);
     });
   });
+
+  describe("given invalid input", () => {
+    it.each([
+      ["an id that isn't a ULID", { id: "not-a-ulid" }],
+      ["a currency other than AUD", { currency: "USD" }],
+      ["a zero amount", { amountCents: 0 }],
+      ["a fractional amount", { amountCents: 10.5 }],
+      ["an unknown category", { category: "gambling" }],
+      ["an impossible date", { date: "2026-02-30" }],
+    ])("rejects %s with 400", async (_, overrides) => {
+      const member = await addMember("tx-house-e", `m-${Math.random()}`);
+
+      const res = await create("tx-house-e", expense(member, overrides));
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("validation_failed");
+    });
+
+    it("rejects an id dated more than 5 minutes in the future", async () => {
+      const member = await addMember("tx-house-e", "future");
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      const res = await create("tx-house-e", expense(member, { id: newUlid(tomorrow) }));
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("invalid_id");
+    });
+
+    it("rejects a member the household doesn't have", async () => {
+      const res = await create("tx-house-e", expense("no-such-member"));
+
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe("member_not_found");
+    });
+  });
 });
