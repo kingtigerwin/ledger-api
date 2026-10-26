@@ -46,6 +46,10 @@ export const listQuerySchema = z.object({
   cursor: z.string().optional(),
 });
 
+export const summaryQuerySchema = z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Must be YYYY-MM"),
+});
+
 export type ListQuery = z.infer<typeof listQuerySchema>;
 export type TransactionFields = z.infer<typeof transactionFieldsSchema>;
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;

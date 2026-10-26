@@ -3,7 +3,13 @@ import { z } from "zod";
 import { ApiError, authContext, json, noContent, parseBody, requireAdmin, withErrors } from "../http";
 import { createMembersStore, MemberNameTakenError, MemberNotFoundError } from "./members-store";
 import { decodeCursor, encodeCursor, InvalidCursorError } from "./cursor";
-import { createTransactionSchema, listQuerySchema, type Transaction, updateTransactionSchema } from "./transaction-schema";
+import {
+  createTransactionSchema,
+  listQuerySchema,
+  summaryQuerySchema,
+  type Transaction,
+  updateTransactionSchema,
+} from "./transaction-schema";
 import {
   createTransactionsStore,
   TransactionExistsError,
@@ -85,6 +91,42 @@ export function createDataHandler(deps: DataDeps) {
     return {
       items: page.items.map((t) => ({ ...t, memberName: names.get(t.memberId) })),
       nextCursor: page.lastKey ? encodeCursor(page.lastKey, deps.cursorSecret) : null,
+    };
+  };
+
+  /**
+   * Totals for one month, computed on request. A household records a few hundred transactions a month,
+   * so reading them all is cheap; precomputed totals would be the upgrade if that changes.
+   */
+  const monthSummary = async (userId: string, month: string) => {
+    const byMember = new Map<string, number>();
+    const byCategory = new Map<string, number>();
+    let totalCents = 0;
+    let startKey: Record<string, unknown> | undefined;
+    do {
+      // Day 31 is a safe upper bound for every month: sort keys compare as strings.
+      const page = await transactions.list(userId, { from: `${month}-01`, to: `${month}-31`, limit: 100 }, startKey);
+      for (const t of page.items) {
+        totalCents += t.amountCents;
+        byMember.set(t.memberId, (byMember.get(t.memberId) ?? 0) + t.amountCents);
+        byCategory.set(t.category, (byCategory.get(t.category) ?? 0) + t.amountCents);
+      }
+      startKey = page.lastKey;
+    } while (startKey);
+
+    const names = new Map((await members.list(userId)).map((m) => [m.id, m.name]));
+    const largestFirst = <T extends { totalCents: number }>(key: (row: T) => string) => (a: T, b: T) =>
+      b.totalCents - a.totalCents || key(a).localeCompare(key(b));
+    return {
+      month,
+      currency: "AUD",
+      totalCents,
+      byMember: [...byMember]
+        .map(([memberId, total]) => ({ memberId, memberName: names.get(memberId), totalCents: total }))
+        .sort(largestFirst((row) => row.memberName ?? "")),
+      byCategory: [...byCategory]
+        .map(([category, total]) => ({ category, totalCents: total }))
+        .sort(largestFirst((row) => row.category)),
     };
   };
 
@@ -171,6 +213,10 @@ export function createDataHandler(deps: DataDeps) {
       case "GET /api/v1/transactions": {
         const userId = requireScope(event, "transactions:read");
         return json(200, await listPage(userId, event));
+      }
+      case "GET /api/v1/transactions/summary": {
+        const userId = requireScope(event, "transactions:read");
+        return json(200, await monthSummary(userId, parseQuery(event, summaryQuerySchema).month));
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);
