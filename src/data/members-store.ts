@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { QueryCommand, type QueryCommandOutput, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  GetCommand,
+  QueryCommand,
+  type QueryCommandOutput,
+  TransactWriteCommand,
+} from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../db-client";
 
 export interface Member {
@@ -11,6 +16,7 @@ export interface Member {
 }
 
 export class MemberNameTakenError extends Error {}
+export class MemberNotFoundError extends Error {}
 
 const userPk = (userId: string) => `USER#${userId}`;
 const memberKey = (userId: string, memberId: string) => ({ pk: userPk(userId), sk: `MEMBER#${memberId}` });
@@ -43,6 +49,56 @@ export function createMembersStore(tableName: string) {
         throw err;
       }
       return member;
+    },
+
+    async get(userId: string, memberId: string): Promise<Member | undefined> {
+      const { Item } = await ddb.send(
+        new GetCommand({ TableName: tableName, Key: memberKey(userId, memberId), ConsistentRead: true }),
+      );
+      return Item ? toMember(Item) : undefined;
+    },
+
+    /** Renames a member, moving the household's name claim from the old name to the new one. */
+    async rename(userId: string, memberId: string, name: string, now: Date): Promise<Member> {
+      const current = await this.get(userId, memberId);
+      if (!current) throw new MemberNotFoundError();
+      const updateMember = {
+        Update: {
+          TableName: tableName,
+          Key: memberKey(userId, memberId),
+          UpdateExpression: "SET #name = :name, updatedAt = :now",
+          ConditionExpression: "attribute_exists(pk)",
+          ExpressionAttributeNames: { "#name": "name" },
+          ExpressionAttributeValues: { ":name": name, ":now": now.toISOString() },
+        },
+      };
+      // Only the letter case changes, so the claim (stored lowercase) stays as it is.
+      const sameClaim = current.name.toLowerCase() === name.toLowerCase();
+      try {
+        await ddb.send(
+          new TransactWriteCommand({
+            TransactItems: sameClaim
+              ? [updateMember]
+              : [
+                  {
+                    Put: {
+                      TableName: tableName,
+                      Item: { ...nameKey(userId, name), memberId },
+                      ConditionExpression: "attribute_not_exists(pk)",
+                    },
+                  },
+                  { Delete: { TableName: tableName, Key: nameKey(userId, current.name) } },
+                  updateMember,
+                ],
+          }),
+        );
+      } catch (err) {
+        if (!(err instanceof Error && err.name === "TransactionCanceledException")) throw err;
+        const reasons = (err as { CancellationReasons?: { Code?: string }[] }).CancellationReasons ?? [];
+        if (!sameClaim && reasons[0]?.Code === "ConditionalCheckFailed") throw new MemberNameTakenError();
+        throw new MemberNotFoundError();
+      }
+      return { ...current, name, updatedAt: now.toISOString() };
     },
 
     /** A household has a handful of members, so this returns them all, sorted by name. */
