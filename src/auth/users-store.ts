@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { GetCommand, TransactWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, TransactWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../db-client";
 
 const MAX_FAILED_LOGINS = 5;
@@ -18,8 +18,18 @@ export interface User {
 
 export class UsernameTakenError extends Error {}
 
+export class InvalidRefreshTokenError extends Error {}
+
 const profileKey = (id: string) => ({ pk: `USER#${id}`, sk: "PROFILE" });
 const usernameKey = (username: string) => ({ pk: `USERNAME#${username}`, sk: "USERNAME" });
+const refreshTokenKey = (userId: string, tokenHash: string) => ({ pk: `USER#${userId}`, sk: `REFRESH#${tokenHash}` });
+
+// `ttl` (epoch seconds) lets DynamoDB delete expired tokens for free.
+const refreshTokenItem = (userId: string, tokenHash: string, expiresAt: Date) => ({
+  ...refreshTokenKey(userId, tokenHash),
+  expiresAt: expiresAt.toISOString(),
+  ttl: Math.floor(expiresAt.getTime() / 1000),
+});
 
 export function createUsersStore(tableName: string) {
   return {
@@ -97,6 +107,44 @@ export function createUsersStore(tableName: string) {
             },
           }),
         );
+      }
+    },
+
+    async getById(userId: string): Promise<User | undefined> {
+      const { Item } = await ddb.send(
+        new GetCommand({ TableName: tableName, Key: profileKey(userId), ConsistentRead: true }),
+      );
+      if (!Item) return undefined;
+      const { id, username, role, status, createdAt } = Item;
+      return { id, username, role, status, createdAt };
+    },
+
+    async saveRefreshToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+      await ddb.send(new PutCommand({ TableName: tableName, Item: refreshTokenItem(userId, tokenHash, expiresAt) }));
+    },
+
+    /** Marks the old token as replaced and stores the new one; fails if the old token is unknown or already replaced. */
+    async rotateRefreshToken(userId: string, oldHash: string, newHash: string, now: Date, expiresAt: Date): Promise<void> {
+      try {
+        await ddb.send(
+          new TransactWriteCommand({
+            TransactItems: [
+              {
+                Update: {
+                  TableName: tableName,
+                  Key: refreshTokenKey(userId, oldHash),
+                  UpdateExpression: "SET replacedAt = :now",
+                  ConditionExpression: "attribute_exists(pk) AND attribute_not_exists(replacedAt)",
+                  ExpressionAttributeValues: { ":now": now.toISOString() },
+                },
+              },
+              { Put: { TableName: tableName, Item: refreshTokenItem(userId, newHash, expiresAt) } },
+            ],
+          }),
+        );
+      } catch (err) {
+        if (err instanceof Error && err.name === "TransactionCanceledException") throw new InvalidRefreshTokenError();
+        throw err;
       }
     },
 

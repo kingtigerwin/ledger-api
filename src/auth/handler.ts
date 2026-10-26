@@ -1,9 +1,15 @@
 import { z } from "zod";
 import { ApiError, json, parseBody, withErrors } from "../http";
 import { hashPassword, verifyPassword } from "./password";
-import { generateRefreshToken, refreshCookie } from "./refresh-tokens";
+import type { APIGatewayProxyEventV2 } from "aws-lambda";
+import {
+  generateRefreshToken,
+  hashRefreshToken,
+  REFRESH_TOKEN_TTL_SECONDS,
+  refreshCookie,
+} from "./refresh-tokens";
 import { ACCESS_TOKEN_TTL_SECONDS, signAccessToken } from "./tokens";
-import { createUsersStore, UsernameTakenError } from "./users-store";
+import { createUsersStore, InvalidRefreshTokenError, type User, UsernameTakenError } from "./users-store";
 
 export interface AuthDeps {
   tableName: string;
@@ -23,14 +29,35 @@ const loginSchema = credentialsSchema.extend({
   refreshTokenIn: z.enum(["cookie", "body"]).default("cookie"),
 });
 
+type Delivery = "cookie" | "body";
+
 /** Sends the refresh token the way the client asked: as a cookie, or in the JSON body. */
-function withRefreshToken(body: Record<string, unknown>, refreshToken: string, deliverIn: "cookie" | "body") {
+function withRefreshToken(body: Record<string, unknown>, refreshToken: string, deliverIn: Delivery) {
   return deliverIn === "body" ? json(200, { ...body, refreshToken }) : json(200, body, [refreshCookie(refreshToken)]);
+}
+
+const invalidRefreshToken = () => new ApiError(401, "invalid_refresh_token", "Log in again");
+
+/** Finds the refresh token in the cookie (browsers) or the JSON body (other clients). */
+function readRefreshToken(event: APIGatewayProxyEventV2): { token: string; deliverIn: Delivery } {
+  const cookie = event.cookies?.find((c) => c.startsWith("refreshToken="));
+  if (cookie) return { token: cookie.slice("refreshToken=".length), deliverIn: "cookie" };
+  try {
+    const { refreshToken } = JSON.parse(event.body ?? "{}");
+    if (typeof refreshToken === "string" && refreshToken) return { token: refreshToken, deliverIn: "body" };
+  } catch {
+    // An unreadable body is the same as a missing token.
+  }
+  throw invalidRefreshToken();
 }
 
 export function createAuthHandler(deps: AuthDeps) {
   const users = createUsersStore(deps.tableName);
   const dummyHash = hashPassword("not-a-real-password");
+
+  const accessTokenFor = (user: User, now: Date) =>
+    signAccessToken({ sub: user.id, role: user.role, scope: CUSTOMER_SCOPE }, deps.signingSecret, now);
+  const refreshExpiry = (now: Date) => new Date(now.getTime() + REFRESH_TOKEN_TTL_SECONDS * 1000);
 
   return withErrors(async (event) => {
     switch (event.routeKey) {
@@ -68,13 +95,26 @@ export function createAuthHandler(deps: AuthDeps) {
         if (found.user.status === "pending") {
           throw new ApiError(403, "account_pending", "This account is waiting for admin approval");
         }
-        const accessToken = await signAccessToken(
-          { sub: found.user.id, role: found.user.role, scope: CUSTOMER_SCOPE },
-          deps.signingSecret,
-          now,
-        );
+        const accessToken = await accessTokenFor(found.user, now);
         const refreshToken = generateRefreshToken(found.user.id);
+        await users.saveRefreshToken(found.user.id, hashRefreshToken(refreshToken), refreshExpiry(now));
         return withRefreshToken({ accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS }, refreshToken, refreshTokenIn);
+      }
+      case "POST /api/v1/auth/refresh": {
+        const now = deps.now();
+        const { token, deliverIn } = readRefreshToken(event);
+        const [userId] = token.split(".");
+        const user = userId ? await users.getById(userId) : undefined;
+        if (!user) throw invalidRefreshToken();
+        const next = generateRefreshToken(user.id);
+        try {
+          await users.rotateRefreshToken(user.id, hashRefreshToken(token), hashRefreshToken(next), now, refreshExpiry(now));
+        } catch (err) {
+          if (err instanceof InvalidRefreshTokenError) throw invalidRefreshToken();
+          throw err;
+        }
+        const accessToken = await accessTokenFor(user, now);
+        return withRefreshToken({ accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS }, next, deliverIn);
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);
