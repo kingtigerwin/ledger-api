@@ -10,7 +10,7 @@ import {
   refreshCookie,
 } from "./refresh-tokens";
 import { ACCESS_TOKEN_TTL_SECONDS, signAccessToken } from "./tokens";
-import { createUsersStore, InvalidRefreshTokenError, type User, UsernameTakenError } from "./users-store";
+import { createUsersStore, InvalidRefreshTokenError, type Role, type User, UsernameTakenError } from "./users-store";
 
 export interface AuthDeps {
   tableName: string;
@@ -18,7 +18,11 @@ export interface AuthDeps {
   now: () => Date;
 }
 
-const CUSTOMER_SCOPE = "members:read members:write transactions:read transactions:write";
+// Admins manage users and read data; they have no household of their own.
+const SCOPES: Record<Role, string> = {
+  customer: "members:read members:write transactions:read transactions:write",
+  admin: "admin:read admin:write",
+};
 
 const credentialsSchema = z.object({
   username: z.string().min(1).max(64).toLowerCase(),
@@ -57,7 +61,7 @@ export function createAuthHandler(deps: AuthDeps) {
   const dummyHash = hashPassword("not-a-real-password");
 
   const accessTokenFor = (user: User, now: Date) =>
-    signAccessToken({ sub: user.id, role: user.role, scope: CUSTOMER_SCOPE }, deps.signingSecret, now);
+    signAccessToken({ sub: user.id, role: user.role, scope: SCOPES[user.role] }, deps.signingSecret, now);
   const refreshExpiry = (now: Date) => new Date(now.getTime() + REFRESH_TOKEN_TTL_SECONDS * 1000);
 
   return withErrors(async (event) => {
