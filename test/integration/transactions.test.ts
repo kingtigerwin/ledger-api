@@ -46,6 +46,8 @@ const create = (house: string, body: unknown) =>
   call(handler, "POST /api/v1/transactions", body, { auth: customer(house) });
 const patch = (house: string, id: string, body: unknown) =>
   call(handler, "PATCH /api/v1/transactions/{id}", body, { auth: customer(house), params: { id } });
+const remove = (house: string, id: string) =>
+  call(handler, "DELETE /api/v1/transactions/{id}", undefined, { auth: customer(house), params: { id } });
 const get = (house: string, id: string) =>
   call(handler, "GET /api/v1/transactions/{id}", undefined, { auth: customer(house), params: { id } });
 
@@ -189,6 +191,35 @@ describe("PATCH /transactions/{id}", () => {
 
       expect(res.status).toBe(404);
       expect(res.body.error.code).toBe("transaction_not_found");
+    });
+  });
+});
+
+describe("DELETE /transactions/{id}", () => {
+  describe("given the household's own transaction", () => {
+    it("deletes it", async () => {
+      const mom = await addMember("tx-house-k", "mom");
+      const body = expense(mom);
+      await create("tx-house-k", body);
+
+      const res = await remove("tx-house-k", body.id);
+
+      expect(res.status).toBe(204);
+      expect((await get("tx-house-k", body.id)).status).toBe(404);
+    });
+  });
+
+  describe("given another household's transaction", () => {
+    it("returns 404 and leaves it alone", async () => {
+      const dad = await addMember("tx-house-l", "dad");
+      const body = expense(dad);
+      await create("tx-house-l", body);
+
+      const res = await remove("tx-house-m", body.id);
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe("transaction_not_found");
+      expect((await get("tx-house-l", body.id)).status).toBe(200);
     });
   });
 });
