@@ -5,6 +5,8 @@ import {
   PutCommand,
   QueryCommand,
   type QueryCommandOutput,
+  ScanCommand,
+  type ScanCommandOutput,
   TransactWriteCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
@@ -25,6 +27,7 @@ export interface User {
 }
 
 export class UsernameTakenError extends Error {}
+export class UserNotFoundError extends Error {}
 
 export class InvalidRefreshTokenError extends Error {
   /** True when the token existed but had already been replaced: a sign it was copied. */
@@ -123,6 +126,31 @@ export function createUsersStore(tableName: string) {
       }
     },
 
+    /**
+     * Scans the whole table. Fine at household-app scale (an admin listing a few sign-ups);
+     * a status index would be the upgrade if the table grows large.
+     */
+    async listByStatus(status: UserStatus): Promise<User[]> {
+      const users: User[] = [];
+      let startKey: Record<string, unknown> | undefined;
+      do {
+        const page: ScanCommandOutput = await ddb.send(
+          new ScanCommand({
+            TableName: tableName,
+            FilterExpression: "sk = :profile AND #status = :status",
+            ExpressionAttributeNames: { "#status": "status" },
+            ExpressionAttributeValues: { ":profile": "PROFILE", ":status": status },
+            ExclusiveStartKey: startKey,
+          }),
+        );
+        for (const { id, username, role, status, createdAt } of page.Items ?? []) {
+          users.push({ id, username, role, status, createdAt });
+        }
+        startKey = page.LastEvaluatedKey;
+      } while (startKey);
+      return users.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    },
+
     async getById(userId: string): Promise<User | undefined> {
       const { Item } = await ddb.send(
         new GetCommand({ TableName: tableName, Key: profileKey(userId), ConsistentRead: true }),
@@ -132,17 +160,25 @@ export function createUsersStore(tableName: string) {
       return { id, username, role, status, createdAt };
     },
 
-    async setStatus(userId: string, status: UserStatus): Promise<void> {
-      await ddb.send(
-        new UpdateCommand({
-          TableName: tableName,
-          Key: profileKey(userId),
-          UpdateExpression: "SET #status = :status",
-          ConditionExpression: "attribute_exists(pk)",
-          ExpressionAttributeNames: { "#status": "status" },
-          ExpressionAttributeValues: { ":status": status },
-        }),
-      );
+    async setStatus(userId: string, status: UserStatus): Promise<User> {
+      try {
+        const { Attributes } = await ddb.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: profileKey(userId),
+            UpdateExpression: "SET #status = :status",
+            ConditionExpression: "attribute_exists(pk)",
+            ExpressionAttributeNames: { "#status": "status" },
+            ExpressionAttributeValues: { ":status": status },
+            ReturnValues: "ALL_NEW",
+          }),
+        );
+        const { id, username, role, createdAt } = Attributes!;
+        return { id, username, role, status, createdAt };
+      } catch (err) {
+        if (err instanceof Error && err.name === "ConditionalCheckFailedException") throw new UserNotFoundError();
+        throw err;
+      }
     },
 
     async saveRefreshToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {

@@ -15,6 +15,9 @@ export interface CallOptions {
   cookies?: string[];
   /** What the Lambda authorizer would have passed for a valid token. */
   auth?: AuthContext;
+  /** Path parameters, e.g. `{ id: "..." }` for `/users/{id}`. */
+  params?: Record<string, string>;
+  query?: Record<string, string>;
 }
 
 /** Calls a Lambda handler the way the HTTP API would, with a JSON body. */
@@ -25,6 +28,8 @@ export async function call(handler: Handler, routeKey: string, body?: unknown, o
     rawPath,
     headers: { "content-type": "application/json" },
     cookies: options.cookies,
+    pathParameters: options.params,
+    queryStringParameters: options.query,
     requestContext: options.auth ? { authorizer: { lambda: options.auth } } : {},
     body: body === undefined ? undefined : JSON.stringify(body),
     isBase64Encoded: false,

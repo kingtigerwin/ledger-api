@@ -12,7 +12,7 @@ A public API where household customers record their spending. It's a learning an
 ## Auth
 
 - `POST /api/v1/auth/register`: anyone can sign up. New users are `pending` until an admin enables them.
-- Root admin `sisi` is created on first deploy with a random password stored in SSM.
+- Root admin `sisi` is created on first deploy with a random password stored in SSM (`/ledger-api/admin-password`). A CDK custom resource runs the bootstrap: it creates only what's missing (the signing secret, the admin password, the admin user) and never overwrites anything. The API stage waits for it. Read the password with `aws ssm get-parameter --name /ledger-api/admin-password --with-decryption`.
 - Passwords are hashed with scrypt (`node:crypto`), stored as `scrypt$N$r$p$salt$hash` and compared with `timingSafeEqual`.
 - Input limits: username and password must be non-empty, at most 64 and 1,024 characters respectively. Usernames are unique and stored lowercase. No other password policy.
 - `POST /api/v1/auth/login` returns a 15-minute HS256 access token with claims `sub`, `role` (`admin` | `customer`) and `scope`. Failed logins always return the same "invalid username or password" error.
@@ -28,7 +28,10 @@ A public API where household customers record their spending. It's a learning an
 ## Roles
 
 - **Customer**: sees and changes only their own members and transactions. Every query is scoped by the token's `userId` in the partition key.
-- **Admin**: lists pending users, enables and disables users (disabling deletes their refresh tokens), and has read-only access to any customer's members and transactions.
+- **Admin**: lists users by status, enables and disables users (disabling deletes their refresh tokens), and has read-only access to any customer's members and transactions.
+  - Admin tokens carry `admin:read admin:write` and no customer scopes: admins have no household of their own. Admin routes check both role and scope.
+  - Admins can't be disabled (409 `cannot_disable_admin`), so the root admin can't be locked out.
+  - Listing users scans the Users table, which is fine at this scale; a status index is the upgrade path.
 
 ## Data
 
