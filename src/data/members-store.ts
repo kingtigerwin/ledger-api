@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { PutCommand, QueryCommand, type QueryCommandOutput } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, type QueryCommandOutput, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../db-client";
 
 export interface Member {
@@ -10,8 +10,11 @@ export interface Member {
   updatedAt: string;
 }
 
+export class MemberNameTakenError extends Error {}
+
 const userPk = (userId: string) => `USER#${userId}`;
 const memberKey = (userId: string, memberId: string) => ({ pk: userPk(userId), sk: `MEMBER#${memberId}` });
+const nameKey = (userId: string, name: string) => ({ pk: userPk(userId), sk: `MEMBERNAME#${name.toLowerCase()}` });
 
 const toMember = ({ id, name, archived, createdAt, updatedAt }: Record<string, unknown>) =>
   ({ id, name, archived, createdAt, updatedAt }) as Member;
@@ -20,7 +23,25 @@ export function createMembersStore(tableName: string) {
   return {
     async create(userId: string, name: string, now: Date): Promise<Member> {
       const member: Member = { id: randomUUID(), name, archived: false, createdAt: now.toISOString(), updatedAt: now.toISOString() };
-      await ddb.send(new PutCommand({ TableName: tableName, Item: { ...memberKey(userId, member.id), ...member } }));
+      try {
+        await ddb.send(
+          new TransactWriteCommand({
+            TransactItems: [
+              {
+                Put: {
+                  TableName: tableName,
+                  Item: { ...nameKey(userId, name), memberId: member.id },
+                  ConditionExpression: "attribute_not_exists(pk)",
+                },
+              },
+              { Put: { TableName: tableName, Item: { ...memberKey(userId, member.id), ...member } } },
+            ],
+          }),
+        );
+      } catch (err) {
+        if (err instanceof Error && err.name === "TransactionCanceledException") throw new MemberNameTakenError();
+        throw err;
+      }
       return member;
     },
 

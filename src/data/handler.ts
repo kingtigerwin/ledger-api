@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { z } from "zod";
 import { ApiError, authContext, json, parseBody, withErrors } from "../http";
-import { createMembersStore } from "./members-store";
+import { createMembersStore, MemberNameTakenError } from "./members-store";
 
 export interface DataDeps {
   tableName: string;
@@ -19,6 +19,18 @@ function requireScope(event: APIGatewayProxyEventV2, scope: string): string {
   return ctx.userId;
 }
 
+/** Runs a member write, turning a name clash into a 409. */
+async function claimingName<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    if (err instanceof MemberNameTakenError) {
+      throw new ApiError(409, "member_name_taken", "Someone in this household already has that name");
+    }
+    throw err;
+  }
+}
+
 export function createDataHandler(deps: DataDeps) {
   const members = createMembersStore(deps.tableName);
 
@@ -27,7 +39,7 @@ export function createDataHandler(deps: DataDeps) {
       case "POST /api/v1/members": {
         const userId = requireScope(event, "members:write");
         const { name } = parseBody(event, memberSchema);
-        return json(201, await members.create(userId, name, deps.now()));
+        return json(201, await claimingName(() => members.create(userId, name, deps.now())));
       }
       case "GET /api/v1/members": {
         const userId = requireScope(event, "members:read");
