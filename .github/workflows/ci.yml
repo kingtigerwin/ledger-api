@@ -30,7 +30,8 @@ jobs:
   #   variable ALARM_EMAIL          (where alarms are emailed; optional)
   #   secret   SMOKE_TEST_PASSWORD  (password for the smoke-test user)
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Skipped until the one-time setup in README.md has set AWS_DEPLOY_ROLE_ARN.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ROLE_ARN != ''
     needs: test
     runs-on: ubuntu-latest
     # One deploy at a time; a newer push waits for the running one instead of racing it.
