@@ -8,6 +8,7 @@ import { createUserWithStatus } from "../support/users";
 
 const LOGIN = "POST /api/v1/auth/login";
 const REFRESH = "POST /api/v1/auth/refresh";
+const LOGOUT = "POST /api/v1/auth/logout";
 
 let tableName: string;
 let handler: ReturnType<typeof createAuthHandler>;
@@ -123,6 +124,23 @@ describe("POST /auth/refresh", () => {
 
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe("invalid_refresh_token");
+    });
+  });
+});
+
+describe("POST /auth/logout", () => {
+  describe("given a logged-in browser", () => {
+    it("clears the cookie, and the refresh token stops working", async () => {
+      await createUserWithStatus(tableName, "pia", "pw", "active");
+      const login = await call(handler, LOGIN, { username: "pia", password: "pw" });
+      const cookie = cookiePair(login.cookies[0]!);
+
+      const res = await call(handler, LOGOUT, undefined, { cookies: [cookie] });
+      const refresh = await call(handler, REFRESH, undefined, { cookies: [cookie] });
+
+      expect(res.status).toBe(204);
+      expect(res.cookies[0]).toMatch(/^refreshToken=; .*Max-Age=0/);
+      expect(refresh.status).toBe(401);
     });
   });
 });
