@@ -136,7 +136,7 @@ export function createUsersStore(tableName: string) {
       await ddb.send(new PutCommand({ TableName: tableName, Item: refreshTokenItem(userId, tokenHash, expiresAt) }));
     },
 
-    /** Marks the old token as replaced and stores the new one; fails if the old token is unknown or already replaced. */
+    /** Marks the old token as replaced and stores the new one; fails if the old token is unknown, expired or already replaced. */
     async rotateRefreshToken(userId: string, oldHash: string, newHash: string, now: Date, expiresAt: Date): Promise<void> {
       try {
         await ddb.send(
@@ -147,7 +147,7 @@ export function createUsersStore(tableName: string) {
                   TableName: tableName,
                   Key: refreshTokenKey(userId, oldHash),
                   UpdateExpression: "SET replacedAt = :now",
-                  ConditionExpression: "attribute_exists(pk) AND attribute_not_exists(replacedAt)",
+                  ConditionExpression: "attribute_exists(pk) AND attribute_not_exists(replacedAt) AND expiresAt > :now",
                   ExpressionAttributeValues: { ":now": now.toISOString() },
                 },
               },
