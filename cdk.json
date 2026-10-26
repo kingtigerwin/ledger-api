@@ -1,0 +1,9 @@
+{
+  "app": "npx tsx bin/app.ts",
+  "watch": {
+    "include": ["bin/**", "lib/**", "src/**"]
+  },
+  "context": {
+    "alarmEmail": ""
+  }
+}
