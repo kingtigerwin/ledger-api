@@ -26,16 +26,16 @@ export interface LedgerDeps {
 export function createLedger(deps: LedgerDeps) {
   const transactions = createTransactionsStore(deps.tableName);
 
-  type Lister = (
+  type Lister<T> = (
     query: Omit<ListQuery, "cursor">,
     startKey?: Record<string, unknown>,
-  ) => Promise<{ items: unknown[]; lastKey?: Record<string, unknown> }>;
+  ) => Promise<{ items: T[]; lastKey?: Record<string, unknown> }>;
 
   const invalidCursor = () => new ApiError(400, "invalid_cursor", "The cursor is invalid; start from the first page");
   const notFound = () => new ApiError(404, "transaction_not_found", "No such transaction");
 
   /** One page from `lister` (one customer's transactions, or everyone's), with a signed cursor for the next page. */
-  const listPage = async (lister: Lister, { cursor, ...query }: ListQuery) => {
+  const listPage = async <T>(lister: Lister<T>, { cursor, ...query }: ListQuery) => {
     let startKey: Record<string, unknown> | undefined;
     try {
       startKey = cursor ? decodeCursor(cursor, deps.cursorSecret) : undefined;

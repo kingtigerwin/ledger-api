@@ -322,7 +322,7 @@ describe("POST /api/mcp", () => {
 
       expect(all.items.map((t: { userId: string; username: string; amountCents: number }) => [t.username, t.amountCents]))
         .toEqual([[haoran.username, 300], [sisi.username, 200], [haoran.username, 100]]);
-      expect(all.items[0]).toMatchObject({ ...cake, userId: haoran.id, date: "2025-01-04" });
+      expect(all.items[0]).toMatchObject({ ...cake, userId: haoran.id, date: "2025-01-04", amountCents: 300 });
       expect(all.nextCursor).toBeNull();
     });
 

@@ -3,6 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { z } from "zod";
+import { createUsersStore } from "../auth/users-store";
 import { ApiError, authContext, withErrors } from "../http";
 import { log } from "../log";
 import { createLedger, type LedgerDeps } from "../data/ledger";
@@ -14,7 +15,10 @@ import {
 } from "../data/transaction-schema";
 import { newUlid } from "../data/ulid";
 
-export type McpDeps = LedgerDeps;
+export type McpDeps = LedgerDeps & {
+  /** For the usernames on the admin's cross-customer list. */
+  usersTableName: string;
+};
 
 const byId = z.object({ id: z.string().describe("The transaction's id") });
 
@@ -24,18 +28,20 @@ const WRITE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, op
 /**
  * MCP over Streamable HTTP, stateless: every POST carries the caller's bearer token, so each request
  * gets a fresh server holding only that caller's tools. The tools mirror the REST Transactions
- * routes and call the same ledger, so rules and error messages are shared.
+ * routes (and, for the admin, `GET /admin/transactions`) and call the same ledger, so rules and
+ * error messages are shared.
  */
 export function createMcpHandler(deps: McpDeps) {
   const ledger = createLedger(deps);
+  const users = createUsersStore(deps.usersTableName);
 
-  const serverFor = (userId: string, scopes: string[]) => {
+  const serverFor = (userId: string, role: string, scopes: string[]) => {
     const server = new McpServer({ name: "ledger-api", version: "1.0.0" });
 
     /** Registers a tool that needs `scope`, answers with JSON text, and reports API errors as tool errors. */
     const tool = <S extends z.ZodObject>(
       name: string,
-      scope: "transactions:read" | "transactions:write",
+      scope: "transactions:read" | "transactions:write" | "admin:read",
       config: { title: string; description: string; inputSchema: S; annotations: ToolAnnotations },
       run: (input: z.infer<S>) => Promise<unknown>,
     ) => {
@@ -50,8 +56,9 @@ export function createMcpHandler(deps: McpDeps) {
         }
       };
       const registered = server.registerTool(name, { ...config, inputSchema: config.inputSchema as z.ZodObject }, callback);
-      // Hidden from tools/list, and calls are refused.
-      if (!scopes.includes(scope)) registered.disable();
+      // Hidden from tools/list, and calls are refused. Admin tools also need the admin role, as `requireAdmin` does.
+      const allowed = scopes.includes(scope) && (!scope.startsWith("admin:") || role === "admin");
+      if (!allowed) registered.disable();
     };
 
     tool(
@@ -142,12 +149,36 @@ export function createMcpHandler(deps: McpDeps) {
       },
     );
 
+    tool(
+      "list_all_transactions",
+      "admin:read",
+      {
+        title: "List every customer's transactions",
+        description:
+          "Admin only. Every customer's transactions, newest first, as { items, nextCursor }; each item has the " +
+          "customer's userId and username (null if the user can't be found). Same filters as list_transactions: " +
+          "from and to (YYYY-MM-DD, inclusive), category, limit 1-100 (default 50). To find one customer's " +
+          "spending, filter by date and keep the items with their username. For the next page, call again with " +
+          "the same filters and cursor set to nextCursor; it is null on the last page.",
+        inputSchema: listQuerySchema,
+        annotations: READ,
+      },
+      async (query) => {
+        const page = await ledger.listAll(query);
+        const usernames = await users.usernames(page.items.map((t) => t.userId));
+        return {
+          ...page,
+          items: page.items.map((t) => ({ ...t, username: usernames.get(t.userId) ?? null })),
+        };
+      },
+    );
+
     return server;
   };
 
   return withErrors(async (event) => {
     const ctx = authContext(event);
-    const server = serverFor(ctx.userId, ctx.scope.split(" "));
+    const server = serverFor(ctx.userId, ctx.role, ctx.scope.split(" "));
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
