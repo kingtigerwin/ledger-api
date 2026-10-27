@@ -10,7 +10,6 @@ import {
 } from "./transaction-schema";
 import {
   createTransactionsStore,
-  TransactionExistsError,
   TransactionNotFoundError,
   VersionConflictError,
 } from "./transactions-store";
@@ -136,17 +135,8 @@ export function createDataHandler(deps: DataDeps) {
           throw new ApiError(400, "invalid_id", "The id's timestamp is in the future");
         }
         // A retry returns what was stored.
-        const existing = await transactions.get(userId, input.id);
-        if (existing) return json(200, existing);
-        try {
-          return json(201, await transactions.create(userId, input, now));
-        } catch (err) {
-          if (!(err instanceof TransactionExistsError)) throw err;
-          // A retry that raced the first request: answer with what was stored.
-          const stored = await transactions.get(userId, input.id);
-          if (!stored) throw err;
-          return json(200, stored);
-        }
+        const { transaction, created } = await transactions.createOnce(userId, input, now);
+        return json(created ? 201 : 200, transaction);
       }
       case "GET /api/v1/transactions/{id}": {
         const userId = requireScope(event, "transactions:read");

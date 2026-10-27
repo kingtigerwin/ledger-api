@@ -81,12 +81,24 @@ All under `/api/v1`.
 | Transactions | `POST /transactions`, `GET /transactions/{id}`, `GET /transactions` (`cursor`, `limit`, `from`, `to`, `category`), `GET /transactions/summary?month=YYYY-MM`, `PATCH /transactions/{id}`, `DELETE /transactions/{id}` |
 | Admin | `GET /admin/users?status=pending`, `POST /admin/users/{id}/enable`, `POST /admin/users/{id}/disable`, `GET /admin/users/{id}/transactions`, `GET /admin/transactions` (everyone's, each with `userId`; same filters), `PATCH /admin/users/{id}/transactions/{transactionId}`, `DELETE /admin/users/{id}/transactions/{transactionId}` |
 
+### MCP, for agents
+
+`POST /api/mcp` (outside `/api/v1`: MCP versions itself) speaks the Model Context Protocol over Streamable HTTP, stateless, with JSON responses (no sessions, no SSE stream), so it fits Lambda. It sits behind the same authorizer as the REST routes: the agent sends the signed-in customer's own access token, and every tool acts as that customer with that token's scopes. The REST API is unchanged; MCP is a second front door to the same store code (`src/mcp/handler.ts`).
+
+Agents call `/api/mcp` and never the REST routes. The flow it was built for: the UI signs the customer in over REST and sends their free text ("today I went to woolworth and bought 30 dollars for cake") plus their access token to the agent (`ledger-agent`, Python, Claude), which calls `create_transaction` over MCP with that token.
+
+| Tool | Needs | Does |
+|---|---|---|
+| `create_transaction` | `transactions:write` (hidden otherwise) | Takes `date`, `category`, `item`, `amountCents`, optional `merchant` and `note`. The server makes the ULID `id` and sets `currency` to AUD, so every call records a new transaction (a retried call can duplicate one). Returns the stored transaction as JSON text. |
+
+The agent puts today's date, in the customer's time zone, into Claude's prompt, so "today" resolves to a real date. More tools (list, summary, edit, delete) are added when the UI needs them.
+
 ## Conventions
 
 - Lists return `{ items, nextCursor }`. The cursor is DynamoDB's `LastEvaluatedKey`, encoded and signed so it can't be tampered with.
 - Errors are `{ error: { code, message, details? } }` with stable `code` strings.
 - `camelCase` fields; dates `YYYY-MM-DD`; timestamps ISO 8601 UTC; money is `amountCents` + `currency`.
-- An OpenAPI spec is generated from the Zod schemas and published at `/api/openapi.json`. A future MCP server for an agent will be built from it; the agent passes the user's own token through.
+- An OpenAPI spec is generated from the Zod schemas and published at `/api/openapi.json`. The MCP tools take their input schemas from the same Zod schemas.
 
 ## Operations
 
@@ -96,7 +108,7 @@ All under `/api/v1`.
 - CloudFront sends `/api/*` (and, for now, the default behaviour) to API Gateway with caching disabled and the `AllViewerExceptHostHeader` origin request policy, so `Authorization`, cookies and query strings reach the API. The raw `execute-api` URL also stays reachable; blocking it would need WAF or a shared-secret header.
 - Lambda JSON logs kept for 2 weeks. All logging goes through `src/log.ts`, which redacts passwords, tokens, cookies and `Authorization` headers.
 - Four CloudWatch alarms (within the free 10), emailing the address in the `alarmEmail` CDK context value (GitHub variable `ALARM_EMAIL`) via SNS: API 5xx ≥ 1, Lambda errors ≥ 1 and throttles ≥ 1 (account-wide metrics, so they also cover other Lambdas in the account and region), and ≥ 20 failed logins in 5 minutes.
-- The smoke test reuses one user, `smoke-test` (password in the GitHub secret `SMOKE_TEST_PASSWORD`), which the admin approves on its first run; it deletes the transaction it creates.
+- The smoke test reuses one user, `smoke-test` (password in the GitHub secret `SMOKE_TEST_PASSWORD`), which the admin approves on its first run. It records one transaction over REST and one over MCP, and deletes both.
 
 ## Testing
 
@@ -106,4 +118,4 @@ All under `/api/v1`.
 
 ## Out of scope for now
 
-UI and its deployment, the agent and MCP server, multiple currencies, income records, custom categories, password reset, WAF, X-Ray.
+UI and its deployment, the agent (its own repo), MCP tools beyond `create_transaction`, OAuth discovery for MCP clients such as claude.ai connectors, multiple currencies, income records, custom categories, password reset, WAF, X-Ray.

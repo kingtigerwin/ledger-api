@@ -29,11 +29,35 @@ async function api(method: string, path: string, options: { token?: string; body
   return { status: res.status, body: text ? JSON.parse(text) : undefined };
 }
 
+let rpcId = 0;
+async function mcp(token: string | undefined, method: string, params: Record<string, unknown> = {}) {
+  const res = await fetch(`${API_URL}/api/mcp`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method, params }),
+  });
+  const text = await res.text();
+  return { status: res.status, body: text ? JSON.parse(text) : undefined };
+}
+
 function expectStatus(step: string, res: { status: number; body: unknown }, ...allowed: number[]) {
   if (!allowed.includes(res.status)) {
     throw new Error(`${step}: expected ${allowed.join(" or ")}, got ${res.status} ${JSON.stringify(res.body)}`);
   }
   console.log(`ok  ${step} (${res.status})`);
+}
+
+/** An MCP call answers 200 even when it fails; the JSON-RPC result says whether it worked. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function expectMcp(step: string, res: { status: number; body: any }, ok: (result: any) => boolean) {
+  if (res.status !== 200 || !res.body?.result || !ok(res.body.result)) {
+    throw new Error(`${step}: got ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  console.log(`ok  ${step}`);
 }
 
 const login = async (username: string, password: string) => {
@@ -89,6 +113,21 @@ async function main() {
   expectStatus("unauthenticated request is refused", await api("GET", "/transactions"), 401);
 
   expectStatus("delete transaction", await api("DELETE", `/transactions/${txn.id}`, { token }), 204);
+
+  // The agent's path: the same customer token, over MCP.
+  const tools = await mcp(token, "tools/list");
+  expectMcp("MCP lists create_transaction", tools, (result) =>
+    result.tools.some((t: { name: string }) => t.name === "create_transaction"));
+  const recorded = await mcp(token, "tools/call", {
+    name: "create_transaction",
+    arguments: { date: txn.date, category: "other", item: "smoke test (mcp)", amountCents: 1 },
+  });
+  expectMcp("MCP records a transaction", recorded, (result) => !result.isError);
+  const mcpTxn = JSON.parse(recorded.body.result.content[0].text);
+  expectStatus("read the MCP transaction over REST", await api("GET", `/transactions/${mcpTxn.id}`, { token }), 200);
+  expectStatus("delete the MCP transaction", await api("DELETE", `/transactions/${mcpTxn.id}`, { token }), 204);
+  expectStatus("unauthenticated MCP request is refused", await mcp(undefined, "tools/list"), 401);
+
   expectStatus("logout", await api("POST", "/auth/logout", { body: { refreshToken: session.body.refreshToken } }), 204);
   expectStatus("OpenAPI spec", { status: (await fetch(`${API_URL}/api/openapi.json`)).status, body: null }, 200);
   console.log("smoke test passed");

@@ -65,6 +65,25 @@ export function createTransactionsStore(tableName: string) {
       return transaction;
     },
 
+    /** Creates the transaction, or, if its id was already used, returns what was stored: retries are safe. */
+    async createOnce(
+      userId: string,
+      input: CreateTransactionInput,
+      now: Date,
+    ): Promise<{ transaction: Transaction; created: boolean }> {
+      const existing = await this.get(userId, input.id);
+      if (existing) return { transaction: existing, created: false };
+      try {
+        return { transaction: await this.create(userId, input, now), created: true };
+      } catch (err) {
+        if (!(err instanceof TransactionExistsError)) throw err;
+        // A retry that raced the first request: answer with what was stored.
+        const stored = await this.get(userId, input.id);
+        if (!stored) throw err;
+        return { transaction: stored, created: false };
+      }
+    },
+
     /**
      * Applies an edit if `expectedVersion` is still current. A new date changes the sort key,
      * so the item is moved: old item deleted, new one written and the pointer updated, atomically.

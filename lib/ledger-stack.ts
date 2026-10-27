@@ -127,6 +127,13 @@ export class LedgerStack extends Stack {
     dataTable.grantReadWriteData(dataFunction);
     canReadSigningSecret(dataFunction);
 
+    // MCP tools for agents; they act as the caller, like the REST routes, so no secret is needed.
+    const mcpFunction = makeFunction("Mcp", "mcp/lambda.ts", {
+      memorySize: 256,
+      environment: { DATA_TABLE: dataTable.tableName },
+    });
+    dataTable.grantReadWriteData(mcpFunction);
+
     const docsFunction = makeFunction("Docs", "docs/lambda.ts", { memorySize: 128 });
 
     const api = new HttpApi(this, "Api", { createDefaultStage: false });
@@ -153,6 +160,12 @@ export class LedgerStack extends Stack {
     for (const [routePath, methods] of dataRoutes) {
       api.addRoutes({ path: routePath, methods, integration: data, authorizer });
     }
+    api.addRoutes({
+      path: "/api/mcp",
+      methods: [HttpMethod.POST],
+      integration: new HttpLambdaIntegration("McpIntegration", mcpFunction),
+      authorizer,
+    });
     const admin = new HttpLambdaIntegration("AdminIntegration", adminFunction);
     api.addRoutes({ path: "/api/v1/admin/users", methods: [HttpMethod.GET], integration: admin, authorizer });
     for (const action of ["enable", "disable"]) {

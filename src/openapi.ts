@@ -11,7 +11,7 @@ import {
 interface Operation {
   method: "get" | "post" | "patch" | "delete";
   path: string;
-  /** Stable and descriptive: a future MCP server turns these into tool names. */
+  /** Stable and descriptive: clients generate method names from these. */
   operationId: string;
   summary: string;
   body?: z.ZodType;
@@ -42,6 +42,7 @@ const operations: Operation[] = [
   { method: "get", path: "/api/v1/transactions/{id}", operationId: "getTransaction", summary: "One transaction" },
   { method: "patch", path: "/api/v1/transactions/{id}", operationId: "updateTransaction", summary: "Edit a transaction; send the version you last read", body: updateTransactionSchema },
   { method: "delete", path: "/api/v1/transactions/{id}", operationId: "deleteTransaction", summary: "Delete a transaction" },
+  { method: "post", path: "/api/mcp", operationId: "mcp", summary: "Model Context Protocol (Streamable HTTP, JSON-RPC) for agents; tools act as the signed-in customer" },
   { method: "get", path: "/api/openapi.json", operationId: "getOpenApiSpec", summary: "This document", public: true },
 ];
 
