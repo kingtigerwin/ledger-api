@@ -20,7 +20,7 @@ Deploys: `LedgerApi` is deployed by the `deploy` job in `.github/workflows/ci.ym
 
 ## Architecture
 
-Two CDK stacks (`bin/app.ts`): `LedgerApi` (`lib/ledger-stack.ts`, the app) and `LedgerApiCiAccess` (`lib/ci-access-stack.ts`, GitHub OIDC deploy role). CloudFront → HTTP API → one Lambda per area, each a thin `lambda.ts` that wires real dependencies into a testable `create…Handler(deps)` in `handler.ts`:
+CDK stacks (`bin/app.ts`): `LedgerApi` (`lib/ledger-stack.ts`, the app), `LedgerApiCertificate` (`lib/certificate-stack.ts`, the custom domain's ACM certificate in us-east-1, only when `customDomain` is set in `cdk.json`) and `LedgerApiCiAccess` (`lib/ci-access-stack.ts`, GitHub OIDC deploy role). CloudFront → HTTP API → one Lambda per area, each a thin `lambda.ts` that wires real dependencies into a testable `create…Handler(deps)` in `handler.ts`:
 
 - `src/auth/`: register, login, refresh, logout, me (Users table); `authorizer-lambda.ts` validates the bearer JWT for every protected route and passes `userId`, `role`, `scope` in the request context.
 - `src/admin/`: list, enable, disable users. `src/data/`: transactions, plus the admin's `/admin/...` routes to view, edit and delete any customer's transactions.
