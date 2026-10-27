@@ -134,6 +134,11 @@ describe("LedgerStack", () => {
       id.startsWith("McpFunction"),
     );
     expect(mcpFunction?.[1].Properties.Environment.Variables).toHaveProperty("DATA_TABLE");
+    // It signs list cursors with a key derived from the signing secret, like the Data function.
+    const mcpPolicy = Object.entries(template.findResources("AWS::IAM::Policy")).find(([id]) =>
+      id.startsWith("McpFunctionServiceRoleDefaultPolicy"),
+    );
+    expect(JSON.stringify(mcpPolicy?.[1].Properties.PolicyDocument)).toContain("ssm:GetParameter");
   });
 
   it("protects /auth/me and leaves the sign-in routes public", () => {
