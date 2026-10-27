@@ -28,8 +28,8 @@ A public API where customers record their spending. It's a learning and portfoli
 ## Roles
 
 - **Customer**: sees and changes only their own transactions. Every query is scoped by the token's `userId` in the partition key.
-- **Admin**: lists users by status, enables and disables users (disabling deletes their refresh tokens), and has read-only access to any customer's transactions.
-  - Admin tokens carry `admin:read admin:write` and no customer scopes: admins record no transactions of their own. Customer tokens carry `transactions:read transactions:write`. Admin routes check both role and scope.
+- **Admin**: lists users by status, enables and disables users (disabling deletes their refresh tokens), records their own transactions like a customer, and can view, edit and delete every customer's transactions.
+  - Admin tokens carry `admin:read admin:write transactions:read transactions:write`; customer tokens carry `transactions:read transactions:write`. The admin's own transactions use the normal `/transactions` routes and live in the admin's own partition. Other customers' transactions are reached only through `/admin/...` routes, which check both role and scope (`admin:read` to view, `admin:write` to edit or delete).
   - Admins can't be disabled (409 `cannot_disable_admin`), so the root admin can't be locked out.
   - Listing users scans the Users table, which is fine at this scale; a status index is the upgrade path.
 
@@ -68,7 +68,7 @@ An expense (no income records), owned by the customer who recorded it. There are
 ### Tables
 
 - `Users`: users, username uniqueness items, refresh tokens, lockout counters.
-- `Data`: transactions, keyed by customer. Transactions sort by `date#id`. One secondary index, `byCategory` (`gsi2pk`/`gsi2sk`, names kept from when a by-member `gsi1` index existed), covers filtering by category.
+- `Data`: transactions, keyed by customer. Transactions sort by `date#id`. Two secondary indexes: `byCategory` (`gsi2pk`/`gsi2sk`, names kept from when a by-member `gsi1` index existed) filters one customer's transactions by category; `allByDate` (`gsi3pk = TXN`, `gsi3sk = date#id`) lists every customer's transactions for the admin. One partition is fine at household scale.
 
 ## Endpoints
 
@@ -78,7 +78,7 @@ All under `/api/v1`.
 |---|---|
 | Auth | `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` |
 | Transactions | `POST /transactions`, `GET /transactions/{id}`, `GET /transactions` (`cursor`, `limit`, `from`, `to`, `category`), `GET /transactions/summary?month=YYYY-MM`, `PATCH /transactions/{id}`, `DELETE /transactions/{id}` |
-| Admin | `GET /admin/users?status=pending`, `POST /admin/users/{id}/enable`, `POST /admin/users/{id}/disable`, `GET /admin/users/{id}/transactions` |
+| Admin | `GET /admin/users?status=pending`, `POST /admin/users/{id}/enable`, `POST /admin/users/{id}/disable`, `GET /admin/users/{id}/transactions`, `GET /admin/transactions` (everyone's, each with `userId`; same filters), `PATCH /admin/users/{id}/transactions/{transactionId}`, `DELETE /admin/users/{id}/transactions/{transactionId}` |
 
 ## Conventions
 

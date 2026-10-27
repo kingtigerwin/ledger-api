@@ -23,11 +23,11 @@ Deploys: `LedgerApi` is deployed by the `deploy` job in `.github/workflows/ci.ym
 Two CDK stacks (`bin/app.ts`): `LedgerApi` (`lib/ledger-stack.ts`, the app) and `LedgerApiCiAccess` (`lib/ci-access-stack.ts`, GitHub OIDC deploy role). CloudFront → HTTP API → one Lambda per area, each a thin `lambda.ts` that wires real dependencies into a testable `create…Handler(deps)` in `handler.ts`:
 
 - `src/auth/`: register, login, refresh, logout, me (Users table); `authorizer-lambda.ts` validates the bearer JWT for every protected route and passes `userId`, `role`, `scope` in the request context.
-- `src/admin/`: list, enable, disable users. `src/data/`: transactions, plus the admin's read-only view of a customer's transactions.
+- `src/admin/`: list, enable, disable users. `src/data/`: transactions, plus the admin's `/admin/...` routes to view, edit and delete any customer's transactions.
 - `src/bootstrap/`: custom resource that creates the SSM secrets and the `sisi` admin on deploy, never overwriting. `src/docs/`: serves `/api/openapi.json`.
 - `src/http.ts` holds the shared handler plumbing (`withErrors`, `ApiError` → `{ error: { code, message } }`, `parseBody`, `requireAdmin`).
 
-Two tables, both keyed `pk`/`sk`: Users (users, username claims, refresh-token hashes, lockouts) and Data (`USER#<userId>` partition holding `TXN#<date>#<id>` items plus `TXNREF#<id>` pointers; one index, `byCategory`, on `gsi2pk`/`gsi2sk`). `src/data/data-table.ts` and `src/auth/users-table.ts` define the keys for both the stack and `test/support/dynamo.ts`.
+Two tables, both keyed `pk`/`sk`: Users (users, username claims, refresh-token hashes, lockouts) and Data (`USER#<userId>` partition holding `TXN#<date>#<id>` items plus `TXNREF#<id>` pointers; indexes `byCategory` on `gsi2pk`/`gsi2sk` and `allByDate` on `gsi3pk`/`gsi3sk` for the admin's cross-customer list). `src/data/data-table.ts` and `src/auth/users-table.ts` define the keys for both the stack and `test/support/dynamo.ts`.
 
 ## Design and working agreement
 
