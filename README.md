@@ -57,6 +57,18 @@ GitHub Actions deploys `main` using GitHub's OIDC login, so no AWS keys are stor
   API_URL=https://api.haoran.cloud SMOKE_TEST_PASSWORD=... npm run smoke
   ```
 
+## MCP
+
+Agents use `POST https://api.haoran.cloud/api/mcp` (MCP over Streamable HTTP, stateless) with the customer's access token as `Authorization: Bearer …`. A quick check:
+
+```sh
+curl -s https://api.haoran.cloud/api/mcp -H "authorization: Bearer $TOKEN" \
+  -H "content-type: application/json" -H "accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+Tools are listed in [`docs/design.md`](docs/design.md#mcp-for-agents).
+
 ## Cost
 
-Everything is on-demand and within the AWS free tier at household traffic: Lambda, DynamoDB on-demand, HTTP API, CloudFront, SSM standard parameters, four CloudWatch alarms (the free tier allows 10), two-week log retention. The CDK bootstrap bucket holds a few MB of deployment assets. The custom domain adds nothing: the ACM certificate is free, and Route 53 doesn't charge for queries to alias records that point at CloudFront. The `haoran.cloud` hosted zone (US$0.50/month) already existed for another site.
+Everything is on-demand and within the AWS free tier at household traffic: Lambda (including the MCP function), DynamoDB on-demand, HTTP API, CloudFront, SSM standard parameters, four CloudWatch alarms (the free tier allows 10), two-week log retention. The CDK bootstrap bucket holds a few MB of deployment assets. The custom domain adds nothing: the ACM certificate is free, and Route 53 doesn't charge for queries to alias records that point at CloudFront. The `haoran.cloud` hosted zone (US$0.50/month) already existed for another site.
