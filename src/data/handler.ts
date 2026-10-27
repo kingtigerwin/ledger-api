@@ -45,8 +45,14 @@ const invalidCursor = () => new ApiError(400, "invalid_cursor", "The cursor is i
 export function createDataHandler(deps: DataDeps) {
   const transactions = createTransactionsStore(deps.tableName);
 
-  /** One page of a customer's transactions, with a signed cursor for the next page. */
-  const listPage = async (userId: string, event: APIGatewayProxyEventV2) => {
+  type Lister = (
+    query: Parameters<typeof transactions.listAll>[0],
+    startKey?: Record<string, unknown>,
+  ) => Promise<{ items: unknown[]; lastKey?: Record<string, unknown> }>;
+  const ofCustomer = (userId: string): Lister => (query, startKey) => transactions.list(userId, query, startKey);
+
+  /** One page from `lister` (one customer's transactions, or everyone's), with a signed cursor for the next page. */
+  const listPage = async (lister: Lister, event: APIGatewayProxyEventV2) => {
     const { cursor, ...query } = parseQuery(event, listQuerySchema);
     let startKey: Record<string, unknown> | undefined;
     try {
@@ -57,7 +63,7 @@ export function createDataHandler(deps: DataDeps) {
     }
     let page;
     try {
-      page = await transactions.list(userId, query, startKey);
+      page = await lister(query, startKey);
     } catch (err) {
       // A genuine cursor from a different filter has keys this query can't start from.
       if (startKey && err instanceof Error && err.name === "ValidationException") throw invalidCursor();
@@ -97,6 +103,29 @@ export function createDataHandler(deps: DataDeps) {
     };
   };
 
+  const update = async (userId: string, id: string, event: APIGatewayProxyEventV2) => {
+    const { version, ...changes } = parseBody(event, updateTransactionSchema);
+    try {
+      return json(200, await transactions.update(userId, id, version, changes, deps.now()));
+    } catch (err) {
+      if (err instanceof TransactionNotFoundError) throw new ApiError(404, "transaction_not_found", "No such transaction");
+      if (err instanceof VersionConflictError) {
+        throw new ApiError(409, "version_conflict", "Someone else changed this transaction; reload it and try again");
+      }
+      throw err;
+    }
+  };
+
+  const remove = async (userId: string, id: string) => {
+    try {
+      await transactions.delete(userId, id);
+    } catch (err) {
+      if (err instanceof TransactionNotFoundError) throw new ApiError(404, "transaction_not_found", "No such transaction");
+      throw err;
+    }
+    return noContent();
+  };
+
   return withErrors(async (event) => {
     switch (event.routeKey) {
       case "POST /api/v1/transactions": {
@@ -127,31 +156,15 @@ export function createDataHandler(deps: DataDeps) {
       }
       case "PATCH /api/v1/transactions/{id}": {
         const userId = requireScope(event, "transactions:write");
-        const { version, ...changes } = parseBody(event, updateTransactionSchema);
-        try {
-          const updated = await transactions.update(userId, event.pathParameters?.id ?? "", version, changes, deps.now());
-          return json(200, updated);
-        } catch (err) {
-          if (err instanceof TransactionNotFoundError) throw new ApiError(404, "transaction_not_found", "No such transaction");
-          if (err instanceof VersionConflictError) {
-            throw new ApiError(409, "version_conflict", "Someone else changed this transaction; reload it and try again");
-          }
-          throw err;
-        }
+        return update(userId, event.pathParameters?.id ?? "", event);
       }
       case "DELETE /api/v1/transactions/{id}": {
         const userId = requireScope(event, "transactions:write");
-        try {
-          await transactions.delete(userId, event.pathParameters?.id ?? "");
-        } catch (err) {
-          if (err instanceof TransactionNotFoundError) throw new ApiError(404, "transaction_not_found", "No such transaction");
-          throw err;
-        }
-        return noContent();
+        return remove(userId, event.pathParameters?.id ?? "");
       }
       case "GET /api/v1/transactions": {
         const userId = requireScope(event, "transactions:read");
-        return json(200, await listPage(userId, event));
+        return json(200, await listPage(ofCustomer(userId), event));
       }
       case "GET /api/v1/transactions/summary": {
         const userId = requireScope(event, "transactions:read");
@@ -159,7 +172,19 @@ export function createDataHandler(deps: DataDeps) {
       }
       case "GET /api/v1/admin/users/{id}/transactions": {
         requireAdmin(event, "admin:read");
-        return json(200, await listPage(event.pathParameters?.id ?? "", event));
+        return json(200, await listPage(ofCustomer(event.pathParameters?.id ?? ""), event));
+      }
+      case "GET /api/v1/admin/transactions": {
+        requireAdmin(event, "admin:read");
+        return json(200, await listPage(transactions.listAll, event));
+      }
+      case "PATCH /api/v1/admin/users/{id}/transactions/{transactionId}": {
+        requireAdmin(event, "admin:write");
+        return update(event.pathParameters?.id ?? "", event.pathParameters?.transactionId ?? "", event);
+      }
+      case "DELETE /api/v1/admin/users/{id}/transactions/{transactionId}": {
+        requireAdmin(event, "admin:write");
+        return remove(event.pathParameters?.id ?? "", event.pathParameters?.transactionId ?? "");
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);

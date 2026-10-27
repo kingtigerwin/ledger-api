@@ -16,11 +16,13 @@ const sortKey = (date: string, id: string) => `${date}#${id}`;
 const refKey = (userId: string, id: string) => ({ pk: userPk(userId), sk: `TXNREF#${id}` });
 const mainKey = (userId: string, date: string, id: string) => ({ pk: userPk(userId), sk: `TXN#${sortKey(date, id)}` });
 
-/** The stored item: the transaction plus its keys in the table and the by-category index. */
+/** The stored item: the transaction plus its keys in the table and both indexes. */
 const toItem = (userId: string, t: Transaction) => ({
   ...mainKey(userId, t.date, t.id),
   gsi2pk: `${userPk(userId)}#CATEGORY#${t.category}`,
   gsi2sk: sortKey(t.date, t.id),
+  gsi3pk: "TXN",
+  gsi3sk: sortKey(t.date, t.id),
   ...t,
 });
 
@@ -152,6 +154,35 @@ export function createTransactionsStore(tableName: string) {
         }),
       );
       return { items: (res.Items ?? []).map(fromItem), lastKey: res.LastEvaluatedKey };
+    },
+
+    /** Every customer's transactions, newest first, each with its owner's userId (for the admin). */
+    async listAll(
+      query: Omit<ListQuery, "cursor" | "limit"> & { limit: number },
+      startKey?: Record<string, unknown>,
+    ): Promise<{ items: (Transaction & { userId: string })[]; lastKey?: Record<string, unknown> }> {
+      const res = await ddb.send(
+        new QueryCommand({
+          TableName: tableName,
+          IndexName: "allByDate",
+          KeyConditionExpression: "gsi3pk = :pk AND gsi3sk BETWEEN :from AND :to",
+          FilterExpression: query.category ? "category = :category" : undefined,
+          ExpressionAttributeValues: {
+            ":pk": "TXN",
+            ":from": query.from ?? EARLIEST,
+            ":to": rangeEnd(query.to ?? LATEST),
+            ...(query.category ? { ":category": query.category } : {}),
+          },
+          ScanIndexForward: false,
+          Limit: query.limit,
+          ExclusiveStartKey: startKey,
+        }),
+      );
+      const items = (res.Items ?? []).map((item) => ({
+        ...fromItem(item),
+        userId: (item.pk as string).slice(userPk("").length),
+      }));
+      return { items, lastKey: res.LastEvaluatedKey };
     },
 
     async get(userId: string, id: string): Promise<Transaction | undefined> {

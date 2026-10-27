@@ -138,6 +138,8 @@ export class LedgerStack extends Stack {
       ["/api/v1/transactions/summary", [HttpMethod.GET]],
       ["/api/v1/transactions/{id}", [HttpMethod.GET, HttpMethod.PATCH, HttpMethod.DELETE]],
       ["/api/v1/admin/users/{id}/transactions", [HttpMethod.GET]],
+      ["/api/v1/admin/users/{id}/transactions/{transactionId}", [HttpMethod.PATCH, HttpMethod.DELETE]],
+      ["/api/v1/admin/transactions", [HttpMethod.GET]],
     ];
     for (const [routePath, methods] of dataRoutes) {
       api.addRoutes({ path: routePath, methods, integration: data, authorizer });
