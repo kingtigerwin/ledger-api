@@ -1,18 +1,14 @@
 // Key schema for the Data table, shared by the CDK stack and the integration tests.
-// Everything a customer owns lives under their partition, so a query can never cross households.
+// Everything a customer owns lives under their partition, so a query can never cross customers.
 //
-//   pk              sk                         item
-//   USER#<userId>   MEMBER#<memberId>          a household member
-//   USER#<userId>   MEMBERNAME#<lowercase>     claims a member name so it's unique in the household
-//   USER#<userId>   TXN#<date>#<txnId>         a transaction (Stage 5)
+//   pk              sk                   item
+//   USER#<userId>   TXN#<date>#<txnId>   a transaction
+//   USER#<userId>   TXNREF#<txnId>       points at the transaction's date, so it can be found by ID
 //
-// Indexes (Stage 5): byMember (gsi1pk = USER#<userId>#MEMBER#<memberId>) and
-// byCategory (gsi2pk = USER#<userId>#CATEGORY#<category>), both sorted by `<date>#<txnId>`.
+// Index: byCategory (gsi2pk = USER#<userId>#CATEGORY#<category>), sorted by `<date>#<txnId>`.
+// It keeps the gsi2 names it had when a by-member index (gsi1) existed: renaming would replace the index.
 export const dataTableKeys = {
   partitionKey: "pk",
   sortKey: "sk",
-  indexes: [
-    { name: "byMember", partitionKey: "gsi1pk", sortKey: "gsi1sk" },
-    { name: "byCategory", partitionKey: "gsi2pk", sortKey: "gsi2sk" },
-  ],
+  indexes: [{ name: "byCategory", partitionKey: "gsi2pk", sortKey: "gsi2sk" }],
 } as const;

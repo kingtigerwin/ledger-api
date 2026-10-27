@@ -83,17 +83,10 @@ describe("LedgerStack", () => {
     expect(JSON.stringify(put?.Resource)).toContain("ledger-api/admin-password");
   });
 
-  it("has a Data table with by-member and by-category indexes", () => {
+  it("has a Data table with only the by-category index", () => {
     template.hasResourceProperties("AWS::DynamoDB::GlobalTable", {
       BillingMode: "PAY_PER_REQUEST",
       GlobalSecondaryIndexes: [
-        Match.objectLike({
-          IndexName: "byMember",
-          KeySchema: [
-            { AttributeName: "gsi1pk", KeyType: "HASH" },
-            { AttributeName: "gsi1sk", KeyType: "RANGE" },
-          ],
-        }),
         Match.objectLike({
           IndexName: "byCategory",
           KeySchema: [
@@ -105,16 +98,10 @@ describe("LedgerStack", () => {
     });
   });
 
-  it("puts the member routes and the admin's member view behind the authorizer", () => {
-    for (const routeKey of [
-      "POST /api/v1/members",
-      "GET /api/v1/members",
-      "PATCH /api/v1/members/{id}",
-      "DELETE /api/v1/members/{id}",
-      "GET /api/v1/admin/users/{id}/members",
-    ]) {
-      template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: routeKey, AuthorizationType: "CUSTOM" });
-    }
+  it("has no member routes", () => {
+    const routeKeys = Object.values(template.findResources("AWS::ApiGatewayV2::Route")).map((r) => r.Properties.RouteKey);
+
+    expect(routeKeys.filter((key: string) => key.includes("/members"))).toEqual([]);
   });
 
   it("puts the transaction routes and the admin's transaction view behind the authorizer", () => {

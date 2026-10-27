@@ -99,9 +99,7 @@ describe("POST /auth/login", () => {
       const claims = await verifyAccessToken(res.body.accessToken, "test-secret", new Date());
       expect(claims.sub).toBe(user.id);
       expect(claims.role).toBe("customer");
-      expect(claims.scope.split(" ")).toEqual(
-        expect.arrayContaining(["members:read", "members:write", "transactions:read", "transactions:write"]),
-      );
+      expect(claims.scope.split(" ")).toEqual(["transactions:read", "transactions:write"]);
       expect(res.body.expiresIn).toBe(900);
     });
   });

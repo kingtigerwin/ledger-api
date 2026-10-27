@@ -8,7 +8,7 @@ import { newUlid } from "../support/ulid";
 const customer = (userId: string): AuthContext => ({
   userId,
   role: "customer",
-  scope: "members:read members:write transactions:read transactions:write",
+  scope: "transactions:read transactions:write",
 });
 
 let tableName: string;
@@ -23,15 +23,9 @@ afterAll(async () => {
   await deleteTable(tableName);
 });
 
-async function addMember(house: string, name: string): Promise<string> {
-  const res = await call(handler, "POST /api/v1/members", { name }, { auth: customer(house) });
-  return res.body.id;
-}
-
 /** The example transaction from the design, with overrides. */
-const expense = (memberId: string, overrides: Record<string, unknown> = {}) => ({
+const expense = (overrides: Record<string, unknown> = {}) => ({
   id: newUlid(),
-  memberId,
   date: "2026-10-26",
   merchant: "Coles",
   category: "groceries",
@@ -53,16 +47,14 @@ const get = (house: string, id: string) =>
 
 describe("POST /transactions and GET /transactions/{id}", () => {
   describe("given a valid expense", () => {
-    it("records it, and it reads back with the member's name", async () => {
-      const mom = await addMember("tx-house-a", "mom");
-      const body = expense(mom);
+    it("records it against the signed-in customer and it reads back the same", async () => {
+      const body = expense();
 
       const created = await create("tx-house-a", body);
       const fetched = await get("tx-house-a", body.id);
 
       const expected = {
         ...body,
-        memberName: "mom",
         version: 1,
         createdAt: expect.any(String),
         updatedAt: expect.any(String),
@@ -76,8 +68,7 @@ describe("POST /transactions and GET /transactions/{id}", () => {
 
   describe("given another household's transaction id", () => {
     it("returns 404", async () => {
-      const dad = await addMember("tx-house-b", "dad");
-      const body = expense(dad);
+      const body = expense();
       await create("tx-house-b", body);
 
       const res = await get("tx-house-c", body.id);
@@ -89,8 +80,7 @@ describe("POST /transactions and GET /transactions/{id}", () => {
 
   describe("given the same id sent twice, as a retry would", () => {
     it("returns the original record with 200 and keeps a single transaction", async () => {
-      const kid = await addMember("tx-house-d", "kid");
-      const body = expense(kid);
+      const body = expense();
       const first = await create("tx-house-d", body);
 
       const retry = await create("tx-house-d", { ...body, amountCents: 99999 });
@@ -110,29 +100,29 @@ describe("POST /transactions and GET /transactions/{id}", () => {
       ["an unknown category", { category: "gambling" }],
       ["an impossible date", { date: "2026-02-30" }],
     ])("rejects %s with 400", async (_, overrides) => {
-      const member = await addMember("tx-house-e", `m-${Math.random()}`);
-
-      const res = await create("tx-house-e", expense(member, overrides));
+      const res = await create("tx-house-e", expense(overrides));
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe("validation_failed");
     });
 
     it("rejects an id dated more than 5 minutes in the future", async () => {
-      const member = await addMember("tx-house-e", "future");
       const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-      const res = await create("tx-house-e", expense(member, { id: newUlid(tomorrow) }));
+      const res = await create("tx-house-e", expense({ id: newUlid(tomorrow) }));
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe("invalid_id");
     });
 
-    it("rejects a member the household doesn't have", async () => {
-      const res = await create("tx-house-e", expense("no-such-member"));
+    it("ignores a memberId, which transactions no longer have", async () => {
+      const body = expense();
 
-      expect(res.status).toBe(422);
-      expect(res.body.error.code).toBe("member_not_found");
+      const res = await create("tx-house-e", { ...body, memberId: "mom" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).not.toHaveProperty("memberId");
+      expect(res.body).not.toHaveProperty("memberName");
     });
   });
 });
@@ -140,8 +130,7 @@ describe("POST /transactions and GET /transactions/{id}", () => {
 describe("PATCH /transactions/{id}", () => {
   describe("given the current version", () => {
     it("applies the change and bumps the version", async () => {
-      const mom = await addMember("tx-house-f", "mom");
-      const body = expense(mom);
+      const body = expense();
       await create("tx-house-f", body);
 
       const res = await patch("tx-house-f", body.id, { version: 1, amountCents: 12000, note: "plus fruit" });
@@ -154,8 +143,7 @@ describe("PATCH /transactions/{id}", () => {
 
   describe("given a version someone else already changed", () => {
     it("refuses with 409 version_conflict and keeps their change", async () => {
-      const dad = await addMember("tx-house-g", "dad");
-      const body = expense(dad);
+      const body = expense();
       await create("tx-house-g", body);
       await patch("tx-house-g", body.id, { version: 1, amountCents: 5000 });
 
@@ -167,24 +155,21 @@ describe("PATCH /transactions/{id}", () => {
     });
   });
 
-  describe("given a new date and member", () => {
+  describe("given a new date", () => {
     it("moves the transaction and it's still found by id", async () => {
-      const mom = await addMember("tx-house-h", "mom");
-      const dad = await addMember("tx-house-h", "dad");
-      const body = expense(mom);
+      const body = expense();
       await create("tx-house-h", body);
 
-      const res = await patch("tx-house-h", body.id, { version: 1, date: "2026-09-01", memberId: dad });
+      const res = await patch("tx-house-h", body.id, { version: 1, date: "2026-09-01" });
 
       expect(res.status).toBe(200);
-      expect((await get("tx-house-h", body.id)).body).toMatchObject({ date: "2026-09-01", memberId: dad, memberName: "dad" });
+      expect((await get("tx-house-h", body.id)).body).toMatchObject({ date: "2026-09-01", version: 2 });
     });
   });
 
   describe("given another household's transaction", () => {
     it("returns 404", async () => {
-      const aunt = await addMember("tx-house-i", "aunt");
-      const body = expense(aunt);
+      const body = expense();
       await create("tx-house-i", body);
 
       const res = await patch("tx-house-j", body.id, { version: 1, amountCents: 1 });
@@ -198,8 +183,7 @@ describe("PATCH /transactions/{id}", () => {
 describe("DELETE /transactions/{id}", () => {
   describe("given the household's own transaction", () => {
     it("deletes it", async () => {
-      const mom = await addMember("tx-house-k", "mom");
-      const body = expense(mom);
+      const body = expense();
       await create("tx-house-k", body);
 
       const res = await remove("tx-house-k", body.id);
@@ -211,8 +195,7 @@ describe("DELETE /transactions/{id}", () => {
 
   describe("given another household's transaction", () => {
     it("returns 404 and leaves it alone", async () => {
-      const dad = await addMember("tx-house-l", "dad");
-      const body = expense(dad);
+      const body = expense();
       await create("tx-house-l", body);
 
       const res = await remove("tx-house-m", body.id);
@@ -224,55 +207,3 @@ describe("DELETE /transactions/{id}", () => {
   });
 });
 
-describe("archived members", () => {
-  const deleteMember = (house: string, id: string) =>
-    call(handler, "DELETE /api/v1/members/{id}", undefined, { auth: customer(house), params: { id } });
-
-  describe("given a member with transactions is deleted", () => {
-    it("archives them instead, and their transactions keep the name", async () => {
-      const mum = await addMember("tx-house-n", "mum");
-      const body = expense(mum);
-      await create("tx-house-n", body);
-
-      const res = await deleteMember("tx-house-n", mum);
-      const members = await call(handler, "GET /api/v1/members", undefined, { auth: customer("tx-house-n") });
-
-      expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({ id: mum, archived: true });
-      expect(members.body.items).toEqual([expect.objectContaining({ id: mum, archived: true })]);
-      expect((await get("tx-house-n", body.id)).body.memberName).toBe("mum");
-    });
-  });
-
-  describe("given an archived member", () => {
-    it("can't be used on a new transaction or an edit", async () => {
-      const old = await addMember("tx-house-o", "old");
-      const current = await addMember("tx-house-o", "current");
-      const kept = expense(old);
-      await create("tx-house-o", kept);
-      const other = expense(current);
-      await create("tx-house-o", other);
-      await deleteMember("tx-house-o", old);
-
-      const created = await create("tx-house-o", expense(old));
-      const edited = await patch("tx-house-o", other.id, { version: 1, memberId: old });
-
-      expect(created.status).toBe(422);
-      expect(created.body.error.code).toBe("member_archived");
-      expect(edited.status).toBe(422);
-      expect(edited.body.error.code).toBe("member_archived");
-    });
-
-    it("still lets a retried create return the original record", async () => {
-      const gran = await addMember("tx-house-p", "gran");
-      const body = expense(gran);
-      const first = await create("tx-house-p", body);
-      await deleteMember("tx-house-p", gran);
-
-      const retry = await create("tx-house-p", body);
-
-      expect(retry.status).toBe(200);
-      expect(retry.body).toEqual(first.body);
-    });
-  });
-});

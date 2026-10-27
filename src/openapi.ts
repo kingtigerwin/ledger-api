@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { statusQuery } from "./admin/schemas";
 import { credentialsSchema, loginSchema } from "./auth/schemas";
-import { memberSchema } from "./data/member-schema";
 import {
   createTransactionSchema,
   listQuerySchema,
@@ -33,15 +32,10 @@ const operations: Operation[] = [
   { method: "get", path: "/api/v1/admin/users", operationId: "adminListUsers", summary: "Admin: list users by status", query: statusQuery },
   { method: "post", path: "/api/v1/admin/users/{id}/enable", operationId: "adminEnableUser", summary: "Admin: activate a user" },
   { method: "post", path: "/api/v1/admin/users/{id}/disable", operationId: "adminDisableUser", summary: "Admin: block a user and end their refresh tokens" },
-  { method: "get", path: "/api/v1/admin/users/{id}/members", operationId: "adminListMembers", summary: "Admin: a customer's members" },
   { method: "get", path: "/api/v1/admin/users/{id}/transactions", operationId: "adminListTransactions", summary: "Admin: a customer's transactions", query: listQuerySchema },
-  { method: "post", path: "/api/v1/members", operationId: "createMember", summary: "Add a household member", body: memberSchema },
-  { method: "get", path: "/api/v1/members", operationId: "listMembers", summary: "All household members, including archived ones" },
-  { method: "patch", path: "/api/v1/members/{id}", operationId: "renameMember", summary: "Rename a member", body: memberSchema },
-  { method: "delete", path: "/api/v1/members/{id}", operationId: "deleteMember", summary: "Delete a member, or archive them if they have transactions" },
   { method: "post", path: "/api/v1/transactions", operationId: "createTransaction", summary: "Record an expense; repeating the same id returns the stored record", body: createTransactionSchema },
   { method: "get", path: "/api/v1/transactions", operationId: "listTransactions", summary: "Transactions, newest first, with optional filters", query: listQuerySchema },
-  { method: "get", path: "/api/v1/transactions/summary", operationId: "getMonthlySummary", summary: "A month's totals by member and by category", query: summaryQuerySchema },
+  { method: "get", path: "/api/v1/transactions/summary", operationId: "getMonthlySummary", summary: "A month's totals by category", query: summaryQuerySchema },
   { method: "get", path: "/api/v1/transactions/{id}", operationId: "getTransaction", summary: "One transaction" },
   { method: "patch", path: "/api/v1/transactions/{id}", operationId: "updateTransaction", summary: "Edit a transaction; send the version you last read", body: updateTransactionSchema },
   { method: "delete", path: "/api/v1/transactions/{id}", operationId: "deleteTransaction", summary: "Delete a transaction" },

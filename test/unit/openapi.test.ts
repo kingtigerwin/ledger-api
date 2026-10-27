@@ -26,7 +26,8 @@ describe("the OpenAPI spec", () => {
     const body = spec.paths["/api/v1/transactions"]!.post.requestBody.content["application/json"].schema;
 
     expect(body.properties.category.enum).toEqual([...CATEGORIES]);
-    expect(body.required).toEqual(expect.arrayContaining(["id", "memberId", "amountCents", "currency"]));
+    expect(body.required).toEqual(expect.arrayContaining(["id", "amountCents", "currency"]));
+    expect(body.properties).not.toHaveProperty("memberId");
   });
 
   it("marks protected routes as needing a bearer token, and sign-in routes as public", () => {

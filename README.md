@@ -1,6 +1,6 @@
 # ledger-api
 
-A serverless API where households record their spending: TypeScript, AWS CDK, Lambda, API Gateway (HTTP API) behind CloudFront, and DynamoDB. Designed to run at $0/month. The design is in [`docs/design.md`](docs/design.md), and the API is described by the OpenAPI spec served at `/api/openapi.json`.
+A serverless API where customers record their spending: TypeScript, AWS CDK, Lambda, API Gateway (HTTP API) behind CloudFront, and DynamoDB. Designed to run at $0/month. The design is in [`docs/design.md`](docs/design.md), and the API is described by the OpenAPI spec served at `/api/openapi.json`.
 
 ## Develop
 
