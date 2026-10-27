@@ -18,7 +18,6 @@ const isoDate = z.iso.date();
 
 // The fields a customer edits; `id` and `currency` are fixed once created.
 export const transactionFieldsSchema = z.object({
-  memberId: z.string().min(1),
   date: isoDate,
   merchant: z.string().trim().max(100).optional(),
   category: z.enum(CATEGORIES),
@@ -40,7 +39,6 @@ export const updateTransactionSchema = transactionFieldsSchema.partial().extend(
 export const listQuerySchema = z.object({
   from: isoDate.optional(),
   to: isoDate.optional(),
-  memberId: z.string().min(1).optional(),
   category: z.enum(CATEGORIES).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   cursor: z.string().optional(),

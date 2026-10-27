@@ -22,7 +22,7 @@ export interface AuthDeps {
 
 // Admins manage users and read data; they have no household of their own.
 const SCOPES: Record<Role, string> = {
-  customer: "members:read members:write transactions:read transactions:write",
+  customer: "transactions:read transactions:write",
   admin: "admin:read admin:write",
 };
 

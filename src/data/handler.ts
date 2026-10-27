@@ -1,14 +1,11 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { z } from "zod";
 import { ApiError, authContext, json, noContent, parseBody, requireAdmin, withErrors } from "../http";
-import { memberSchema } from "./member-schema";
-import { createMembersStore, MemberNameTakenError, MemberNotFoundError } from "./members-store";
 import { decodeCursor, encodeCursor, InvalidCursorError } from "./cursor";
 import {
   createTransactionSchema,
   listQuerySchema,
   summaryQuerySchema,
-  type Transaction,
   updateTransactionSchema,
 } from "./transaction-schema";
 import {
@@ -37,19 +34,6 @@ function requireScope(event: APIGatewayProxyEventV2, scope: string): string {
   return ctx.userId;
 }
 
-/** Runs a member write, turning store errors into API errors. */
-async function mapMemberErrors<T>(write: () => Promise<T>): Promise<T> {
-  try {
-    return await write();
-  } catch (err) {
-    if (err instanceof MemberNameTakenError) {
-      throw new ApiError(409, "member_name_taken", "Someone in this household already has that name");
-    }
-    if (err instanceof MemberNotFoundError) throw new ApiError(404, "member_not_found", "No such member");
-    throw err;
-  }
-}
-
 function parseQuery<T extends z.ZodType>(event: APIGatewayProxyEventV2, schema: T): z.infer<T> {
   const result = schema.safeParse(event.queryStringParameters ?? {});
   if (!result.success) throw new ApiError(400, "validation_failed", "Query is invalid", result.error.issues);
@@ -59,18 +43,9 @@ function parseQuery<T extends z.ZodType>(event: APIGatewayProxyEventV2, schema: 
 const invalidCursor = () => new ApiError(400, "invalid_cursor", "The cursor is invalid; start from the first page");
 
 export function createDataHandler(deps: DataDeps) {
-  const members = createMembersStore(deps.tableName);
   const transactions = createTransactionsStore(deps.tableName);
 
-  /** A transaction may only point at one of the household's own members. */
-  const requireMember = async (userId: string, memberId: string) => {
-    const member = await members.get(userId, memberId);
-    if (!member) throw new ApiError(422, "member_not_found", "That member isn't in this household");
-    if (member.archived) throw new ApiError(422, "member_archived", "That member is archived");
-    return member;
-  };
-
-  /** One page of a household's transactions, with member names and a signed cursor for the next page. */
+  /** One page of a customer's transactions, with a signed cursor for the next page. */
   const listPage = async (userId: string, event: APIGatewayProxyEventV2) => {
     const { cursor, ...query } = parseQuery(event, listQuerySchema);
     let startKey: Record<string, unknown> | undefined;
@@ -88,19 +63,17 @@ export function createDataHandler(deps: DataDeps) {
       if (startKey && err instanceof Error && err.name === "ValidationException") throw invalidCursor();
       throw err;
     }
-    const names = new Map((await members.list(userId)).map((m) => [m.id, m.name]));
     return {
-      items: page.items.map((t) => ({ ...t, memberName: names.get(t.memberId) })),
+      items: page.items,
       nextCursor: page.lastKey ? encodeCursor(page.lastKey, deps.cursorSecret) : null,
     };
   };
 
   /**
-   * Totals for one month, computed on request. A household records a few hundred transactions a month,
+   * Totals for one month, computed on request. A customer records a few hundred transactions a month,
    * so reading them all is cheap; precomputed totals would be the upgrade if that changes.
    */
   const monthSummary = async (userId: string, month: string) => {
-    const byMember = new Map<string, number>();
     const byCategory = new Map<string, number>();
     let totalCents = 0;
     let startKey: Record<string, unknown> | undefined;
@@ -109,64 +82,23 @@ export function createDataHandler(deps: DataDeps) {
       const page = await transactions.list(userId, { from: `${month}-01`, to: `${month}-31`, limit: 100 }, startKey);
       for (const t of page.items) {
         totalCents += t.amountCents;
-        byMember.set(t.memberId, (byMember.get(t.memberId) ?? 0) + t.amountCents);
         byCategory.set(t.category, (byCategory.get(t.category) ?? 0) + t.amountCents);
       }
       startKey = page.lastKey;
     } while (startKey);
 
-    const names = new Map((await members.list(userId)).map((m) => [m.id, m.name]));
-    const largestFirst = <T extends { totalCents: number }>(key: (row: T) => string) => (a: T, b: T) =>
-      b.totalCents - a.totalCents || key(a).localeCompare(key(b));
     return {
       month,
       currency: "AUD",
       totalCents,
-      byMember: [...byMember]
-        .map(([memberId, total]) => ({ memberId, memberName: names.get(memberId), totalCents: total }))
-        .sort(largestFirst((row) => row.memberName ?? "")),
       byCategory: [...byCategory]
         .map(([category, total]) => ({ category, totalCents: total }))
-        .sort(largestFirst((row) => row.category)),
+        .sort((a, b) => b.totalCents - a.totalCents || a.category.localeCompare(b.category)),
     };
   };
 
-  /** Adds the member's current name, so renaming a member never touches transactions. */
-  const withMemberName = async (userId: string, t: Transaction) => ({
-    ...t,
-    memberName: (await members.get(userId, t.memberId))?.name,
-  });
-
   return withErrors(async (event) => {
     switch (event.routeKey) {
-      case "POST /api/v1/members": {
-        const userId = requireScope(event, "members:write");
-        const { name } = parseBody(event, memberSchema);
-        return json(201, await mapMemberErrors(() => members.create(userId, name, deps.now())));
-      }
-      case "GET /api/v1/members": {
-        const userId = requireScope(event, "members:read");
-        return json(200, { items: await members.list(userId), nextCursor: null });
-      }
-      case "PATCH /api/v1/members/{id}": {
-        const userId = requireScope(event, "members:write");
-        const { name } = parseBody(event, memberSchema);
-        return json(200, await mapMemberErrors(() => members.rename(userId, event.pathParameters?.id ?? "", name, deps.now())));
-      }
-      case "DELETE /api/v1/members/{id}": {
-        const userId = requireScope(event, "members:write");
-        const memberId = event.pathParameters?.id ?? "";
-        // Members with history are archived so their transactions keep a name.
-        if (await transactions.memberHasTransactions(userId, memberId)) {
-          return json(200, await mapMemberErrors(() => members.archive(userId, memberId, deps.now())));
-        }
-        await mapMemberErrors(() => members.delete(userId, memberId));
-        return noContent();
-      }
-      case "GET /api/v1/admin/users/{id}/members": {
-        requireAdmin(event, "admin:read");
-        return json(200, { items: await members.list(event.pathParameters?.id ?? ""), nextCursor: null });
-      }
       case "POST /api/v1/transactions": {
         const userId = requireScope(event, "transactions:write");
         const input = parseBody(event, createTransactionSchema);
@@ -174,37 +106,31 @@ export function createDataHandler(deps: DataDeps) {
         if (ulidTime(input.id).getTime() > now.getTime() + MAX_CLOCK_SKEW_MS) {
           throw new ApiError(400, "invalid_id", "The id's timestamp is in the future");
         }
-        // A retry returns what was stored, even if the member has since been archived.
+        // A retry returns what was stored.
         const existing = await transactions.get(userId, input.id);
-        if (existing) return json(200, await withMemberName(userId, existing));
-        await requireMember(userId, input.memberId);
+        if (existing) return json(200, existing);
         try {
-          return json(201, await withMemberName(userId, await transactions.create(userId, input, now)));
+          return json(201, await transactions.create(userId, input, now));
         } catch (err) {
           if (!(err instanceof TransactionExistsError)) throw err;
           // A retry that raced the first request: answer with what was stored.
           const stored = await transactions.get(userId, input.id);
           if (!stored) throw err;
-          return json(200, await withMemberName(userId, stored));
+          return json(200, stored);
         }
       }
       case "GET /api/v1/transactions/{id}": {
         const userId = requireScope(event, "transactions:read");
         const transaction = await transactions.get(userId, event.pathParameters?.id ?? "");
         if (!transaction) throw new ApiError(404, "transaction_not_found", "No such transaction");
-        return json(200, await withMemberName(userId, transaction));
+        return json(200, transaction);
       }
       case "PATCH /api/v1/transactions/{id}": {
         const userId = requireScope(event, "transactions:write");
         const { version, ...changes } = parseBody(event, updateTransactionSchema);
-        const id = event.pathParameters?.id ?? "";
-        // Only a change of member is checked, so other edits still work after a member is archived.
-        if (changes.memberId && changes.memberId !== (await transactions.get(userId, id))?.memberId) {
-          await requireMember(userId, changes.memberId);
-        }
         try {
-          const updated = await transactions.update(userId, id, version, changes, deps.now());
-          return json(200, await withMemberName(userId, updated));
+          const updated = await transactions.update(userId, event.pathParameters?.id ?? "", version, changes, deps.now());
+          return json(200, updated);
         } catch (err) {
           if (err instanceof TransactionNotFoundError) throw new ApiError(404, "transaction_not_found", "No such transaction");
           if (err instanceof VersionConflictError) {

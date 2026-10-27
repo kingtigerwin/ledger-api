@@ -1,7 +1,7 @@
 // Post-deploy smoke test against the live API. Usage:
 //   API_URL=https://dxxxx.cloudfront.net SMOKE_TEST_PASSWORD=... npm run smoke
 // Reuses one user, `smoke-test` (there's no delete-user endpoint); the admin approves it on the
-// first run. Everything else it creates is deleted again.
+// first run. The transaction it creates is deleted again.
 import { randomInt } from "node:crypto";
 import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 import { ADMIN_PASSWORD_PARAM, ADMIN_USERNAME } from "../src/config";
@@ -73,11 +73,8 @@ async function main() {
   expectStatus("smoke-test login", session, 200);
   const token = session.body.accessToken;
 
-  const member = await api("POST", "/members", { token, body: { name: `smoke-${Date.now()}` } });
-  expectStatus("create member", member, 201);
   const txn = {
     id: newUlid(),
-    memberId: member.body.id,
     date: new Date().toISOString().slice(0, 10),
     category: "other",
     item: "smoke test",
@@ -87,12 +84,11 @@ async function main() {
   expectStatus("create transaction", await api("POST", "/transactions", { token, body: txn }), 201);
   expectStatus("repeat create returns the original", await api("POST", "/transactions", { token, body: txn }), 200);
   expectStatus("read transaction", await api("GET", `/transactions/${txn.id}`, { token }), 200);
-  expectStatus("list transactions", await api("GET", `/transactions?memberId=${member.body.id}`, { token }), 200);
+  expectStatus("list transactions", await api("GET", "/transactions?category=other", { token }), 200);
   expectStatus("monthly summary", await api("GET", `/transactions/summary?month=${txn.date.slice(0, 7)}`, { token }), 200);
   expectStatus("unauthenticated request is refused", await api("GET", "/transactions"), 401);
 
   expectStatus("delete transaction", await api("DELETE", `/transactions/${txn.id}`, { token }), 204);
-  expectStatus("delete member", await api("DELETE", `/members/${member.body.id}`, { token }), 204);
   expectStatus("logout", await api("POST", "/auth/logout", { body: { refreshToken: session.body.refreshToken } }), 204);
   expectStatus("OpenAPI spec", { status: (await fetch(`${API_URL}/api/openapi.json`)).status, body: null }, 200);
   console.log("smoke test passed");

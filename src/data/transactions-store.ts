@@ -16,20 +16,19 @@ const sortKey = (date: string, id: string) => `${date}#${id}`;
 const refKey = (userId: string, id: string) => ({ pk: userPk(userId), sk: `TXNREF#${id}` });
 const mainKey = (userId: string, date: string, id: string) => ({ pk: userPk(userId), sk: `TXN#${sortKey(date, id)}` });
 
-/** The stored item: the transaction plus its keys in the table and both indexes. */
+/** The stored item: the transaction plus its keys in the table and the by-category index. */
 const toItem = (userId: string, t: Transaction) => ({
   ...mainKey(userId, t.date, t.id),
-  gsi1pk: `${userPk(userId)}#MEMBER#${t.memberId}`,
-  gsi1sk: sortKey(t.date, t.id),
   gsi2pk: `${userPk(userId)}#CATEGORY#${t.category}`,
   gsi2sk: sortKey(t.date, t.id),
   ...t,
 });
 
 const fromItem = (item: Record<string, unknown>): Transaction => {
-  const { id, memberId, date, merchant, category, item: what, amountCents, currency, note, version, createdAt, updatedAt } =
+  // Picks known fields only, so attributes from older versions (memberId, gsi1*) never leak out.
+  const { id, date, merchant, category, item: what, amountCents, currency, note, version, createdAt, updatedAt } =
     item as unknown as Transaction;
-  return { id, memberId, date, merchant, category, item: what, amountCents, currency, note, version, createdAt, updatedAt };
+  return { id, date, merchant, category, item: what, amountCents, currency, note, version, createdAt, updatedAt };
 };
 
 // Sort keys are `<date>#<id>`, so a date range is a key range: from the start of `from`
@@ -125,10 +124,7 @@ export function createTransactionsStore(tableName: string) {
       );
     },
 
-    /**
-     * Newest first. Picks the access path the filters allow: the by-member index (with category
-     * as a filter if given), the by-category index, or the main key. Dates are always a key range.
-     */
+    /** Newest first: the by-category index if a category is given, otherwise the main key. Dates are always a key range. */
     async list(
       userId: string,
       query: Omit<ListQuery, "cursor" | "limit"> & { limit: number },
@@ -136,24 +132,19 @@ export function createTransactionsStore(tableName: string) {
     ): Promise<{ items: Transaction[]; lastKey?: Record<string, unknown> }> {
       const from = query.from ?? EARLIEST;
       const to = rangeEnd(query.to ?? LATEST);
-      const path = query.memberId
-        ? { IndexName: "byMember", pk: "gsi1pk", pkValue: `${userPk(userId)}#MEMBER#${query.memberId}`, sk: "gsi1sk", prefix: "" }
-        : query.category
-          ? { IndexName: "byCategory", pk: "gsi2pk", pkValue: `${userPk(userId)}#CATEGORY#${query.category}`, sk: "gsi2sk", prefix: "" }
-          : { IndexName: undefined, pk: "pk", pkValue: userPk(userId), sk: "sk", prefix: "TXN#" };
-      const filterByCategory = Boolean(query.memberId && query.category);
+      const path = query.category
+        ? { IndexName: "byCategory", pk: "gsi2pk", pkValue: `${userPk(userId)}#CATEGORY#${query.category}`, sk: "gsi2sk", prefix: "" }
+        : { IndexName: undefined, pk: "pk", pkValue: userPk(userId), sk: "sk", prefix: "TXN#" };
       const res = await ddb.send(
         new QueryCommand({
           TableName: tableName,
           IndexName: path.IndexName,
           KeyConditionExpression: "#pk = :pk AND #sk BETWEEN :from AND :to",
-          FilterExpression: filterByCategory ? "category = :category" : undefined,
           ExpressionAttributeNames: { "#pk": path.pk, "#sk": path.sk },
           ExpressionAttributeValues: {
             ":pk": path.pkValue,
             ":from": path.prefix + from,
             ":to": path.prefix + to,
-            ...(filterByCategory ? { ":category": query.category } : {}),
           },
           ScanIndexForward: false,
           Limit: query.limit,
@@ -161,20 +152,6 @@ export function createTransactionsStore(tableName: string) {
         }),
       );
       return { items: (res.Items ?? []).map(fromItem), lastKey: res.LastEvaluatedKey };
-    },
-
-    /** One read on the by-member index: does this member have any transactions at all? */
-    async memberHasTransactions(userId: string, memberId: string): Promise<boolean> {
-      const res = await ddb.send(
-        new QueryCommand({
-          TableName: tableName,
-          IndexName: "byMember",
-          KeyConditionExpression: "gsi1pk = :pk",
-          ExpressionAttributeValues: { ":pk": `${userPk(userId)}#MEMBER#${memberId}` },
-          Limit: 1,
-        }),
-      );
-      return (res.Items ?? []).length > 0;
     },
 
     async get(userId: string, id: string): Promise<Transaction | undefined> {
