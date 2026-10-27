@@ -18,6 +18,8 @@ export interface CallOptions {
   /** Path parameters, e.g. `{ id: "..." }` for `/users/{id}`. */
   params?: Record<string, string>;
   query?: Record<string, string>;
+  /** Extra request headers, added to `content-type: application/json`. */
+  headers?: Record<string, string>;
 }
 
 /** Calls a Lambda handler the way the HTTP API would, with a JSON body. */
@@ -26,7 +28,7 @@ export async function call(handler: Handler, routeKey: string, body?: unknown, o
   const event = {
     routeKey,
     rawPath,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...options.headers },
     cookies: options.cookies,
     pathParameters: options.params,
     queryStringParameters: options.query,

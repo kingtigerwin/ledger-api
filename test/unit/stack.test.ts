@@ -128,6 +128,14 @@ describe("LedgerStack", () => {
     }
   });
 
+  it("serves MCP behind the authorizer, from a function that can use the Data table", () => {
+    template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "POST /api/mcp", AuthorizationType: "CUSTOM" });
+    const [mcpFunction] = Object.entries(template.findResources("AWS::Lambda::Function")).filter(([id]) =>
+      id.startsWith("McpFunction"),
+    );
+    expect(mcpFunction?.[1].Properties.Environment.Variables).toHaveProperty("DATA_TABLE");
+  });
+
   it("protects /auth/me and leaves the sign-in routes public", () => {
     template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
       RouteKey: "GET /api/v1/auth/me",
