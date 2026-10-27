@@ -152,7 +152,7 @@ describe("GET /auth/me", () => {
       const user = await createUserWithStatus(tableName, "quinn", "pw", "active");
 
       const res = await call(handler, ME, undefined, {
-        auth: { userId: user.id, role: "customer", scope: "members:read" },
+        auth: { userId: user.id, role: "customer", scope: "transactions:read" },
       });
 
       expect(res.status).toBe(200);

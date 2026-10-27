@@ -7,7 +7,7 @@ import { call } from "../support/http";
 import { createUserWithStatus } from "../support/users";
 
 const ADMIN: AuthContext = { userId: "admin-1", role: "admin", scope: "admin:read admin:write" };
-const CUSTOMER: AuthContext = { userId: "customer-1", role: "customer", scope: "members:read members:write" };
+const CUSTOMER: AuthContext = { userId: "customer-1", role: "customer", scope: "transactions:read transactions:write" };
 
 let tableName: string;
 let handler: ReturnType<typeof createAdminHandler>;
