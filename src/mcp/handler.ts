@@ -1,28 +1,62 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
-import { authContext, withErrors } from "../http";
+import { z } from "zod";
+import { ApiError, authContext, withErrors } from "../http";
 import { log } from "../log";
-import { transactionFieldsSchema } from "../data/transaction-schema";
-import { createTransactionsStore } from "../data/transactions-store";
+import { createLedger, type LedgerDeps } from "../data/ledger";
+import {
+  listQuerySchema,
+  summaryQuerySchema,
+  transactionFieldsSchema,
+  updateTransactionSchema,
+} from "../data/transaction-schema";
 import { newUlid } from "../data/ulid";
 
-export interface McpDeps {
-  tableName: string;
-  now: () => Date;
-}
+export type McpDeps = LedgerDeps;
+
+const byId = z.object({ id: z.string().describe("The transaction's id") });
+
+const READ: ToolAnnotations = { readOnlyHint: true, openWorldHint: false };
+const WRITE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 
 /**
  * MCP over Streamable HTTP, stateless: every POST carries the caller's bearer token, so each request
- * gets a fresh server holding only that caller's tools. Tools run the same store code as the REST API.
+ * gets a fresh server holding only that caller's tools. The tools mirror the REST Transactions
+ * routes and call the same ledger, so rules and error messages are shared.
  */
 export function createMcpHandler(deps: McpDeps) {
-  const transactions = createTransactionsStore(deps.tableName);
+  const ledger = createLedger(deps);
 
   const serverFor = (userId: string, scopes: string[]) => {
     const server = new McpServer({ name: "ledger-api", version: "1.0.0" });
-    const createTool = server.registerTool(
+
+    /** Registers a tool that needs `scope`, answers with JSON text, and reports API errors as tool errors. */
+    const tool = <S extends z.ZodObject>(
+      name: string,
+      scope: "transactions:read" | "transactions:write",
+      config: { title: string; description: string; inputSchema: S; annotations: ToolAnnotations },
+      run: (input: z.infer<S>) => Promise<unknown>,
+    ) => {
+      // The SDK has already validated `input` against `config.inputSchema`.
+      const callback: ToolCallback<z.ZodObject> = async (input) => {
+        try {
+          return { content: [{ type: "text", text: JSON.stringify(await run(input as z.infer<S>)) }] };
+        } catch (err) {
+          if (err instanceof ApiError) return { isError: true, content: [{ type: "text", text: err.message }] };
+          log({ event: "mcp_tool_failed", tool: name, err }, "error");
+          return { isError: true, content: [{ type: "text", text: "Something went wrong; try again" }] };
+        }
+      };
+      const registered = server.registerTool(name, { ...config, inputSchema: config.inputSchema as z.ZodObject }, callback);
+      // Hidden from tools/list, and calls are refused.
+      if (!scopes.includes(scope)) registered.disable();
+    };
+
+    tool(
       "create_transaction",
+      "transactions:write",
       {
         title: "Record an expense",
         description:
@@ -31,25 +65,83 @@ export function createMcpHandler(deps: McpDeps) {
           "in the customer's time zone. Pick the closest category, or other. " +
           "Every call records a new transaction, so call it once per expense. Returns the stored transaction.",
         inputSchema: transactionFieldsSchema,
-        annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false },
+        annotations: { ...WRITE, idempotentHint: false },
       },
       async (fields) => {
-        const now = deps.now();
-        try {
-          const { transaction } = await transactions.createOnce(
-            userId,
-            { ...fields, id: newUlid(now), currency: "AUD" },
-            now,
-          );
-          return { content: [{ type: "text", text: JSON.stringify(transaction) }] };
-        } catch (err) {
-          log({ event: "mcp_tool_failed", tool: "create_transaction", err }, "error");
-          return { isError: true, content: [{ type: "text", text: "Couldn't record the transaction; try again" }] };
-        }
+        const { transaction } = await ledger.record(userId, { ...fields, id: newUlid(deps.now()), currency: "AUD" });
+        return transaction;
       },
     );
-    // Hidden from tools/list, and calls are refused.
-    if (!scopes.includes("transactions:write")) createTool.disable();
+
+    tool(
+      "get_transaction",
+      "transactions:read",
+      {
+        title: "Get a transaction",
+        description: "One of the signed-in customer's transactions, by id, including its current version.",
+        inputSchema: byId,
+        annotations: READ,
+      },
+      ({ id }) => ledger.get(userId, id),
+    );
+
+    tool(
+      "list_transactions",
+      "transactions:read",
+      {
+        title: "List transactions",
+        description:
+          "The signed-in customer's transactions, newest first, as { items, nextCursor }. " +
+          "Optional filters: from and to (YYYY-MM-DD, inclusive), category. limit is 1-100 (default 50). " +
+          "For the next page, call again with the same filters and cursor set to nextCursor; it is null on the last page.",
+        inputSchema: listQuerySchema,
+        annotations: READ,
+      },
+      (query) => ledger.list(userId, query),
+    );
+
+    tool(
+      "get_monthly_summary",
+      "transactions:read",
+      {
+        title: "Monthly spending summary",
+        description: "The signed-in customer's total spending for a month (YYYY-MM), in cents, and by category, largest first.",
+        inputSchema: summaryQuerySchema,
+        annotations: READ,
+      },
+      ({ month }) => ledger.summary(userId, month),
+    );
+
+    tool(
+      "update_transaction",
+      "transactions:write",
+      {
+        title: "Edit a transaction",
+        description:
+          "Changes some fields of one of the signed-in customer's transactions. Send only the fields to change, " +
+          "plus the version from your latest read (get_transaction or list_transactions). " +
+          "If someone changed it since, the call fails: read it again and retry. Returns the updated transaction.",
+        inputSchema: updateTransactionSchema.extend(byId.shape),
+        annotations: { ...WRITE, idempotentHint: false },
+      },
+      ({ id, version, ...changes }) => ledger.update(userId, id, version, changes),
+    );
+
+    tool(
+      "delete_transaction",
+      "transactions:write",
+      {
+        title: "Delete a transaction",
+        description: "Permanently deletes one of the signed-in customer's transactions, by id.",
+        inputSchema: byId,
+        annotations: { ...WRITE, destructiveHint: true, idempotentHint: true },
+      },
+      async ({ id }) => {
+        await ledger.remove(userId, id);
+        return { id, deleted: true };
+      },
+    );
+
     return server;
   };
 

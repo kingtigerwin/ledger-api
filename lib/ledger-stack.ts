@@ -127,12 +127,13 @@ export class LedgerStack extends Stack {
     dataTable.grantReadWriteData(dataFunction);
     canReadSigningSecret(dataFunction);
 
-    // MCP tools for agents; they act as the caller, like the REST routes, so no secret is needed.
+    // MCP tools for agents: the Transactions routes again, acting as the caller. The signing secret is for list cursors.
     const mcpFunction = makeFunction("Mcp", "mcp/lambda.ts", {
       memorySize: 256,
       environment: { DATA_TABLE: dataTable.tableName },
     });
     dataTable.grantReadWriteData(mcpFunction);
+    canReadSigningSecret(mcpFunction);
 
     const docsFunction = makeFunction("Docs", "docs/lambda.ts", { memorySize: 128 });
 

@@ -2,6 +2,13 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export class InvalidCursorError extends Error {}
 
+/**
+ * Cursors get their own key, derived from the JWT secret, so no second secret is needed and a cursor
+ * can never be mistaken for a token. REST and MCP derive the same key, so their cursors are interchangeable.
+ */
+export const cursorSecretFrom = (signingSecret: string) =>
+  createHmac("sha256", signingSecret).update("ledger-api cursor key").digest("base64url");
+
 const sign = (payload: string, secret: string) => createHmac("sha256", secret).update(payload).digest("base64url");
 
 /**
