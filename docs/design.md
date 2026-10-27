@@ -6,7 +6,8 @@ A public API where customers record their spending. It's a learning and portfoli
 
 - TypeScript, AWS CDK, Lambda (Node 22, arm64), API Gateway HTTP API, DynamoDB (on-demand).
 - CloudFront in front of the API at `/api/*` (no S3 origin in this stack; a UI may be added later as another origin).
-- Region `ap-southeast-2`. One stack, `LedgerApi`.
+- Region `ap-southeast-2`. The app is one stack, `LedgerApi`; with a custom domain, a small `LedgerApiCertificate` stack in `us-east-1` holds its ACM certificate (CloudFront only accepts certificates from there), passed across with CDK cross-region references.
+- Custom domain: `api.haoran.cloud`, in the existing `haoran.cloud` Route 53 zone (which also serves another site). Configured in `cdk.json` (`customDomain`); the zone is imported by ID, never looked up (a lookup would put the account ID in `cdk.context.json`) and never modified apart from the API's `A`/`AAAA` alias records and ACM's validation record. The CloudFront domain keeps working.
 - Secrets (JWT signing secret, root admin password) are SSM Parameter Store `SecureString`s, created once by a CDK custom resource and never overwritten. They are never in source.
 
 ## Auth

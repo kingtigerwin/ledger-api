@@ -19,6 +19,7 @@ GitHub Actions deploys `main` using GitHub's OIDC login, so no AWS keys are stor
 
    ```sh
    npx cdk bootstrap aws://<account-id>/ap-southeast-2
+   npx cdk bootstrap aws://<account-id>/us-east-1   # only with a custom domain: its certificate must live there
    npx cdk deploy LedgerApiCiAccess
    ```
 
@@ -33,9 +34,13 @@ GitHub Actions deploys `main` using GitHub's OIDC login, so no AWS keys are stor
    | Variable | `DEPLOY_ENABLED` | `true` (turns the deploy job on) |
    | Variable | `ALARM_EMAIL` | where to email alarms (optional) |
 
-3. Push to `main` (or re-run the CI workflow on `main`). The `deploy` job runs `cdk deploy LedgerApi` and then the smoke test against the CloudFront URL (`ApiUrl` output).
+3. Push to `main` (or re-run the CI workflow on `main`). The `deploy` job runs `cdk deploy LedgerApi` (plus `LedgerApiCertificate` first, if a custom domain is set) and then the smoke test against the `ApiUrl` output.
 
 4. If you set `ALARM_EMAIL`, confirm the subscription email AWS sends.
+
+### Custom domain (optional)
+
+`cdk.json` sets `customDomain` to `api.haoran.cloud` in the existing `haoran.cloud` Route 53 zone. The deploy then issues a free ACM certificate in `us-east-1` (the only region CloudFront accepts), validated by a record ACM adds to the zone, and adds `A`/`AAAA` alias records for the name. It never creates or replaces the zone or its other records. To use another domain, change the three values; to turn it off, set `customDomain` to `""`. The CloudFront URL keeps working either way (`CloudFrontUrl` output).
 
 ## After deploying
 
@@ -49,9 +54,9 @@ GitHub Actions deploys `main` using GitHub's OIDC login, so no AWS keys are stor
 - Run the smoke test yourself:
 
   ```sh
-  API_URL=https://<distribution>.cloudfront.net SMOKE_TEST_PASSWORD=... npm run smoke
+  API_URL=https://api.haoran.cloud SMOKE_TEST_PASSWORD=... npm run smoke
   ```
 
 ## Cost
 
-Everything is on-demand and within the AWS free tier at household traffic: Lambda, DynamoDB on-demand, HTTP API, CloudFront, SSM standard parameters, four CloudWatch alarms (the free tier allows 10), two-week log retention. The CDK bootstrap bucket holds a few MB of deployment assets.
+Everything is on-demand and within the AWS free tier at household traffic: Lambda, DynamoDB on-demand, HTTP API, CloudFront, SSM standard parameters, four CloudWatch alarms (the free tier allows 10), two-week log retention. The CDK bootstrap bucket holds a few MB of deployment assets. The custom domain adds nothing: the ACM certificate is free, and Route 53 doesn't charge for queries to alias records that point at CloudFront. The `haoran.cloud` hosted zone (US$0.50/month) already existed for another site.
