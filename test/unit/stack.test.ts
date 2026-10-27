@@ -141,6 +141,22 @@ describe("LedgerStack", () => {
     expect(JSON.stringify(mcpPolicy?.[1].Properties.PolicyDocument)).toContain("ssm:GetParameter");
   });
 
+  it("lets the MCP function read usernames from the Users table, but not write to it", () => {
+    const [mcpFunction] = Object.entries(template.findResources("AWS::Lambda::Function")).filter(([id]) =>
+      id.startsWith("McpFunction"),
+    );
+    expect(mcpFunction?.[1].Properties.Environment.Variables).toHaveProperty("USERS_TABLE");
+    const [, mcpPolicy] = Object.entries(template.findResources("AWS::IAM::Policy")).find(([id]) =>
+      id.startsWith("McpFunctionServiceRoleDefaultPolicy"),
+    )!;
+    const usersStatements = mcpPolicy.Properties.PolicyDocument.Statement.filter((s: { Resource: unknown }) =>
+      JSON.stringify(s.Resource).includes("UsersTable"),
+    );
+    const actions = usersStatements.flatMap((s: { Action: string | string[] }) => [s.Action].flat());
+    expect(actions).toContain("dynamodb:BatchGetItem");
+    expect(actions.filter((a: string) => /Put|Update|Delete|Write/.test(a))).toEqual([]);
+  });
+
   it("protects /auth/me and leaves the sign-in routes public", () => {
     template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
       RouteKey: "GET /api/v1/auth/me",
