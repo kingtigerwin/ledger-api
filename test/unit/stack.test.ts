@@ -83,7 +83,7 @@ describe("LedgerStack", () => {
     expect(JSON.stringify(put?.Resource)).toContain("ledger-api/admin-password");
   });
 
-  it("has a Data table with only the by-category index", () => {
+  it("has a Data table with a by-category index and an all-customers index", () => {
     template.hasResourceProperties("AWS::DynamoDB::GlobalTable", {
       BillingMode: "PAY_PER_REQUEST",
       GlobalSecondaryIndexes: [
@@ -92,6 +92,13 @@ describe("LedgerStack", () => {
           KeySchema: [
             { AttributeName: "gsi2pk", KeyType: "HASH" },
             { AttributeName: "gsi2sk", KeyType: "RANGE" },
+          ],
+        }),
+        Match.objectLike({
+          IndexName: "allByDate",
+          KeySchema: [
+            { AttributeName: "gsi3pk", KeyType: "HASH" },
+            { AttributeName: "gsi3sk", KeyType: "RANGE" },
           ],
         }),
       ],
@@ -113,6 +120,9 @@ describe("LedgerStack", () => {
       "PATCH /api/v1/transactions/{id}",
       "DELETE /api/v1/transactions/{id}",
       "GET /api/v1/admin/users/{id}/transactions",
+      "GET /api/v1/admin/transactions",
+      "PATCH /api/v1/admin/users/{id}/transactions/{transactionId}",
+      "DELETE /api/v1/admin/users/{id}/transactions/{transactionId}",
     ]) {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: routeKey, AuthorizationType: "CUSTOM" });
     }
