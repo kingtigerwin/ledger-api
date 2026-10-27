@@ -23,15 +23,24 @@ import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from "aws-cdk-li
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
 import { Provider } from "aws-cdk-lib/custom-resources";
+import type { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
+import { AaaaRecord, ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
+import { CloudFrontTarget } from "aws-cdk-lib/aws-route53-targets";
 import type { Construct } from "constructs";
+import type { CustomDomain } from "./certificate-stack";
 import { usersTableKeys } from "../src/auth/users-table";
 import { ADMIN_PASSWORD_PARAM, SIGNING_SECRET_PARAM } from "../src/config";
 import { dataTableKeys } from "../src/data/data-table";
 // Unauthenticated routes that anyone on the internet can call, so they get tighter throttling.
 const PUBLIC_AUTH_ROUTES = ["register", "login", "refresh", "logout"].map((name) => `/api/v1/auth/${name}`);
 
+export interface LedgerStackProps extends StackProps {
+  /** Serve the API on this name as well as the CloudFront domain; the certificate comes from CertificateStack. */
+  customDomain?: CustomDomain & { certificate: ICertificate };
+}
+
 export class LedgerStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
+  constructor(scope: Construct, id: string, props?: LedgerStackProps) {
     super(scope, id, props);
 
     const usersTable = new TableV2(this, "UsersTable", {
@@ -180,12 +189,28 @@ export class LedgerStack extends Stack {
       // Forwards the Authorization header, cookies and query strings.
       originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
     };
+    const customDomain = props?.customDomain;
     const distribution = new Distribution(this, "Cdn", {
       defaultBehavior: apiBehavior,
       additionalBehaviors: { "/api/*": apiBehavior },
       priceClass: PriceClass.PRICE_CLASS_100,
+      ...(customDomain ? { domainNames: [customDomain.domainName], certificate: customDomain.certificate } : {}),
     });
-    new CfnOutput(this, "ApiUrl", { value: `https://${distribution.distributionDomainName}` });
+    if (customDomain) {
+      // Only adds the API's own records; the zone and its other records belong to whoever manages the domain.
+      const zone = HostedZone.fromHostedZoneAttributes(this, "Zone", {
+        zoneName: customDomain.zoneName,
+        hostedZoneId: customDomain.hostedZoneId,
+      });
+      const target = RecordTarget.fromAlias(new CloudFrontTarget(distribution));
+      const recordName = customDomain.domainName;
+      new ARecord(this, "ApiAliasIpv4", { zone, recordName, target });
+      new AaaaRecord(this, "ApiAliasIpv6", { zone, recordName, target });
+    }
+    new CfnOutput(this, "CloudFrontUrl", { value: `https://${distribution.distributionDomainName}` });
+    new CfnOutput(this, "ApiUrl", {
+      value: `https://${customDomain?.domainName ?? distribution.distributionDomainName}`,
+    });
 
     // Four alarms keeps within CloudWatch's free 10. The Lambda ones use the account-wide
     // metrics (one alarm each instead of one per function), so they also cover any other
