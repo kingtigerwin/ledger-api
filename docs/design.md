@@ -83,11 +83,11 @@ All under `/api/v1`.
 
 ### MCP, for agents
 
-`POST /api/mcp` (outside `/api/v1`: MCP versions itself) speaks the Model Context Protocol over Streamable HTTP, stateless, with JSON responses (no sessions, no SSE stream), so it fits Lambda. It sits behind the same authorizer as the REST routes: the agent sends the signed-in customer's own access token, and every tool acts as that customer with that token's scopes. The REST API is unchanged; MCP is a second front door to the same store code (`src/mcp/handler.ts`).
+`POST /api/mcp` (outside `/api/v1`: MCP versions itself) speaks the Model Context Protocol over Streamable HTTP, stateless, with JSON responses (no sessions, no SSE stream), so it fits Lambda. It sits behind the same authorizer as the REST routes: the agent sends the signed-in user's own access token, and every tool acts as that user with that token's scopes. The REST API is unchanged; MCP is a second front door to the same store code (`src/mcp/handler.ts`).
 
 Agents call `/api/mcp` and never the REST routes. The flow it was built for: the UI signs the customer in over REST and sends their free text ("today I went to woolworth and bought 30 dollars for cake") plus their access token to the agent (`ledger-agent`, Python, Claude), which calls `create_transaction` over MCP with that token.
 
-Each tool mirrors a Transactions route and acts on the signed-in customer's own transactions. Tools whose scope the token lacks are hidden from `tools/list` and refused. Results are JSON text: the same bodies the REST routes return. Failures (not found, stale version, bad cursor) come back as tool errors (`isError: true`) with the REST error's message; bad arguments are rejected against the same Zod schemas.
+Each customer tool mirrors a Transactions route and acts on the signed-in user's own transactions. Tools whose scope the token lacks are hidden from `tools/list` and refused; admin tools also need the `admin` role, as the REST admin routes do, so a customer token never sees them. Results are JSON text: the same bodies the REST routes return, except that `list_all_transactions` adds `username`. Failures (not found, stale version, bad cursor) come back as tool errors (`isError: true`) with the REST error's message; bad arguments are rejected against the same Zod schemas.
 
 | Tool | Route it mirrors | Needs | Notes |
 |---|---|---|---|
@@ -97,8 +97,9 @@ Each tool mirrors a Transactions route and acts on the signed-in customer's own 
 | `get_monthly_summary` | `GET /transactions/summary` | `transactions:read` | Read-only. |
 | `update_transaction` | `PATCH /transactions/{id}` | `transactions:write` | `id`, `version` from the latest read, and the fields to change. |
 | `delete_transaction` | `DELETE /transactions/{id}` | `transactions:write` | Marked destructive, so clients can ask before calling it. |
+| `list_all_transactions` | `GET /admin/transactions` | `admin:read` (and the `admin` role) | Read-only. Every customer's transactions, newest first, same filters and cursors. Each item has `userId` and `username` (null if the user can't be found), so an agent can answer "show haoran's spending" by matching the username. The usernames come from one `BatchGetItem` per page on the Users table, which the MCP Lambda can read but not write. |
 
-The rules live in `src/data/ledger.ts`, which both `src/data/handler.ts` (REST) and `src/mcp/handler.ts` call. The agent puts today's date, in the customer's time zone, into Claude's prompt, so "today" resolves to a real date. Admin tools are not exposed over MCP.
+The rules live in `src/data/ledger.ts`, which both `src/data/handler.ts` (REST) and `src/mcp/handler.ts` call. The agent puts today's date, in the customer's time zone, into Claude's prompt, so "today" resolves to a real date. The admin's write routes (edit or delete any customer's transaction) and the user-management routes are not exposed over MCP.
 
 ## Conventions
 
@@ -125,4 +126,4 @@ The rules live in `src/data/ledger.ts`, which both `src/data/handler.ts` (REST) 
 
 ## Out of scope for now
 
-UI and its deployment, the agent (its own repo), admin MCP tools, OAuth discovery for MCP clients such as claude.ai connectors, multiple currencies, income records, custom categories, password reset, WAF, X-Ray.
+UI and its deployment, the agent (its own repo), OAuth discovery for MCP clients such as claude.ai connectors, multiple currencies, income records, custom categories, password reset, WAF, X-Ray.
