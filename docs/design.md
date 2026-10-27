@@ -87,11 +87,18 @@ All under `/api/v1`.
 
 Agents call `/api/mcp` and never the REST routes. The flow it was built for: the UI signs the customer in over REST and sends their free text ("today I went to woolworth and bought 30 dollars for cake") plus their access token to the agent (`ledger-agent`, Python, Claude), which calls `create_transaction` over MCP with that token.
 
-| Tool | Needs | Does |
-|---|---|---|
-| `create_transaction` | `transactions:write` (hidden otherwise) | Takes `date`, `category`, `item`, `amountCents`, optional `merchant` and `note`. The server makes the ULID `id` and sets `currency` to AUD, so every call records a new transaction (a retried call can duplicate one). Returns the stored transaction as JSON text. |
+Each tool mirrors a Transactions route and acts on the signed-in customer's own transactions. Tools whose scope the token lacks are hidden from `tools/list` and refused. Results are JSON text: the same bodies the REST routes return. Failures (not found, stale version, bad cursor) come back as tool errors (`isError: true`) with the REST error's message; bad arguments are rejected against the same Zod schemas.
 
-The agent puts today's date, in the customer's time zone, into Claude's prompt, so "today" resolves to a real date. More tools (list, summary, edit, delete) are added when the UI needs them.
+| Tool | Route it mirrors | Needs | Notes |
+|---|---|---|---|
+| `create_transaction` | `POST /transactions` | `transactions:write` | Takes `date`, `category`, `item`, `amountCents`, optional `merchant` and `note`. The server makes the ULID `id` and sets `currency` to AUD, so every call records a new transaction (a retried call can duplicate one). |
+| `get_transaction` | `GET /transactions/{id}` | `transactions:read` | Read-only. |
+| `list_transactions` | `GET /transactions` | `transactions:read` | Read-only. Same filters and signed `nextCursor`; cursors work across REST and MCP. |
+| `get_monthly_summary` | `GET /transactions/summary` | `transactions:read` | Read-only. |
+| `update_transaction` | `PATCH /transactions/{id}` | `transactions:write` | `id`, `version` from the latest read, and the fields to change. |
+| `delete_transaction` | `DELETE /transactions/{id}` | `transactions:write` | Marked destructive, so clients can ask before calling it. |
+
+The rules live in `src/data/ledger.ts`, which both `src/data/handler.ts` (REST) and `src/mcp/handler.ts` call. The agent puts today's date, in the customer's time zone, into Claude's prompt, so "today" resolves to a real date. Admin tools are not exposed over MCP.
 
 ## Conventions
 
@@ -108,7 +115,7 @@ The agent puts today's date, in the customer's time zone, into Claude's prompt, 
 - CloudFront sends `/api/*` (and, for now, the default behaviour) to API Gateway with caching disabled and the `AllViewerExceptHostHeader` origin request policy, so `Authorization`, cookies and query strings reach the API. The raw `execute-api` URL also stays reachable; blocking it would need WAF or a shared-secret header.
 - Lambda JSON logs kept for 2 weeks. All logging goes through `src/log.ts`, which redacts passwords, tokens, cookies and `Authorization` headers.
 - Four CloudWatch alarms (within the free 10), emailing the address in the `alarmEmail` CDK context value (GitHub variable `ALARM_EMAIL`) via SNS: API 5xx ≥ 1, Lambda errors ≥ 1 and throttles ≥ 1 (account-wide metrics, so they also cover other Lambdas in the account and region), and ≥ 20 failed logins in 5 minutes.
-- The smoke test reuses one user, `smoke-test` (password in the GitHub secret `SMOKE_TEST_PASSWORD`), which the admin approves on its first run. It records one transaction over REST and one over MCP, and deletes both.
+- The smoke test reuses one user, `smoke-test` (password in the GitHub secret `SMOKE_TEST_PASSWORD`), which the admin approves on its first run. It runs a transaction through REST and another through every MCP tool, and deletes both.
 
 ## Testing
 
@@ -118,4 +125,4 @@ The agent puts today's date, in the customer's time zone, into Claude's prompt, 
 
 ## Out of scope for now
 
-UI and its deployment, the agent (its own repo), MCP tools beyond `create_transaction`, OAuth discovery for MCP clients such as claude.ai connectors, multiple currencies, income records, custom categories, password reset, WAF, X-Ray.
+UI and its deployment, the agent (its own repo), admin MCP tools, OAuth discovery for MCP clients such as claude.ai connectors, multiple currencies, income records, custom categories, password reset, WAF, X-Ray.

@@ -24,7 +24,7 @@ CDK stacks (`bin/app.ts`): `LedgerApi` (`lib/ledger-stack.ts`, the app), `Ledger
 
 - `src/auth/`: register, login, refresh, logout, me (Users table); `authorizer-lambda.ts` validates the bearer JWT for every protected route and passes `userId`, `role`, `scope` in the request context.
 - `src/admin/`: list, enable, disable users. `src/data/`: transactions, plus the admin's `/admin/...` routes to view, edit and delete any customer's transactions.
-- `src/mcp/`: `POST /api/mcp`, MCP over stateless Streamable HTTP for agents. Behind the same authorizer; a fresh `McpServer` per request holds the caller's tools, which call the same store code as the REST handlers.
+- `src/mcp/`: `POST /api/mcp`, MCP over stateless Streamable HTTP for agents. Behind the same authorizer; a fresh `McpServer` per request holds the caller's tools, one per Transactions route. `src/data/ledger.ts` holds the transaction rules and errors that both the REST handler and the MCP tools call, so add behaviour there, not in either front door.
 - `src/bootstrap/`: custom resource that creates the SSM secrets and the `sisi` admin on deploy, never overwriting. `src/docs/`: serves `/api/openapi.json`.
 - `src/http.ts` holds the shared handler plumbing (`withErrors`, `ApiError` → `{ error: { code, message } }`, `parseBody`, `requireAdmin`).
 

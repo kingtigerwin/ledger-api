@@ -116,16 +116,25 @@ async function main() {
 
   // The agent's path: the same customer token, over MCP.
   const tools = await mcp(token, "tools/list");
-  expectMcp("MCP lists create_transaction", tools, (result) =>
-    result.tools.some((t: { name: string }) => t.name === "create_transaction"));
-  const recorded = await mcp(token, "tools/call", {
-    name: "create_transaction",
-    arguments: { date: txn.date, category: "other", item: "smoke test (mcp)", amountCents: 1 },
+  expectMcp("MCP lists the Transactions tools", tools, (result) =>
+    ["create_transaction", "get_transaction", "list_transactions", "get_monthly_summary", "update_transaction",
+      "delete_transaction"].every((name) => result.tools.some((t: { name: string }) => t.name === name)));
+  const tool = (name: string, args: Record<string, unknown>) => mcp(token, "tools/call", { name, arguments: args });
+  const recorded = await tool("create_transaction", {
+    date: txn.date, category: "other", item: "smoke test (mcp)", amountCents: 1,
   });
   expectMcp("MCP records a transaction", recorded, (result) => !result.isError);
   const mcpTxn = JSON.parse(recorded.body.result.content[0].text);
   expectStatus("read the MCP transaction over REST", await api("GET", `/transactions/${mcpTxn.id}`, { token }), 200);
-  expectStatus("delete the MCP transaction", await api("DELETE", `/transactions/${mcpTxn.id}`, { token }), 204);
+  expectMcp("MCP gets it", await tool("get_transaction", { id: mcpTxn.id }), (result) => !result.isError);
+  expectMcp("MCP lists it", await tool("list_transactions", { category: "other" }), (result) =>
+    JSON.parse(result.content[0].text).items.some((t: { id: string }) => t.id === mcpTxn.id));
+  expectMcp("MCP monthly summary", await tool("get_monthly_summary", { month: txn.date.slice(0, 7) }),
+    (result) => !result.isError);
+  expectMcp("MCP updates it", await tool("update_transaction", { id: mcpTxn.id, version: 1, note: "edited" }),
+    (result) => !result.isError && JSON.parse(result.content[0].text).version === 2);
+  expectMcp("MCP deletes it", await tool("delete_transaction", { id: mcpTxn.id }), (result) => !result.isError);
+  expectStatus("the MCP delete is seen over REST", await api("GET", `/transactions/${mcpTxn.id}`, { token }), 404);
   expectStatus("unauthenticated MCP request is refused", await mcp(undefined, "tools/list"), 401);
 
   expectStatus("logout", await api("POST", "/auth/logout", { body: { refreshToken: session.body.refreshToken } }), 204);
