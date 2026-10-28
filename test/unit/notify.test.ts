@@ -25,8 +25,9 @@ const SETTINGS = { adminEmail: "sisi@example.com", apiUrl: "https://api.haoran.c
 
 describe("emailsFor", () => {
   describe("given a customer who has just registered", () => {
-    it("tells them the account is waiting for approval, then asks the admin to approve or reject it", () => {
-      const [customer, admin, ...rest] = emailsFor(undefined, profile(), SETTINGS);
+    it("asks the admin to approve or reject it, then tells them the account is waiting for approval", () => {
+      // The admin's first, so a customer's address SES won't take can't hold it up.
+      const [admin, customer, ...rest] = emailsFor(undefined, profile(), SETTINGS);
 
       expect(customer).toMatchObject({ kind: "pending", to: "haoran@example.com" });
       expect(customer?.subject).toMatch(/waiting for approval/i);
@@ -89,16 +90,21 @@ const record = (before: Record<string, unknown> | undefined, after: Record<strin
 });
 const streamEvent = (...Records: DynamoDBRecord[]): DynamoDBStreamEvent => ({ Records });
 
-/** A notifier whose sender records what it was asked to send, failing for the given addresses. */
-function setup(failFor: string[] = []) {
+/** A notifier whose sender records what it was asked to send, failing for the given addresses with the given SES error. */
+function setup(failFor: Record<string, string> = {}) {
   const sent: OutgoingEmail[] = [];
   const logs: LogEntry[] = [];
   const handler = createNotifyHandler({
     from: FROM,
     ...SETTINGS,
     sendEmail: async (email) => {
-      // As SES words it in the sandbox: the error names the address.
-      if (failFor.includes(email.to)) throw new Error(`Email address is not verified: ${email.to}`);
+      const errorName = failFor[email.to];
+      if (errorName) {
+        // As SES words it in the sandbox: the error names the address.
+        const err = new Error(`Email address is not verified: ${email.to}`);
+        err.name = errorName;
+        throw err;
+      }
       sent.push(email);
     },
     log: (entry) => logs.push(entry),
@@ -121,16 +127,16 @@ describe("the notify Lambda", () => {
 
       expect(res).toEqual({ batchItemFailures: [] });
       expect(sent.map((e) => [e.from, e.to, e.subject])).toEqual([
-        [FROM, "haoran@example.com", expect.stringMatching(/waiting for approval/i)],
         [FROM, "sisi@example.com", expect.stringMatching(/haoran/)],
+        [FROM, "haoran@example.com", expect.stringMatching(/waiting for approval/i)],
         [FROM, "haoran@example.com", expect.stringMatching(/approved/i)],
       ]);
     });
   });
 
-  describe("given a send that fails", () => {
+  describe("given a send that fails for a reason that may pass, such as throttling", () => {
     it("reports that record, so the stream retries from it, and sends nothing after it", async () => {
-      const { handler, sent } = setup(["bad@example.com"]);
+      const { handler, sent } = setup({ "bad@example.com": "TooManyRequestsException" });
       const ok = record(undefined, profile({ id: "u-1", email: "ok@example.com" }));
       const failing = record(undefined, profile({ id: "u-2", email: "bad@example.com" }));
       const later = record(undefined, profile({ id: "u-3", email: "later@example.com" }));
@@ -138,11 +144,12 @@ describe("the notify Lambda", () => {
       const res = await handler(streamEvent(ok, failing, later));
 
       expect(res).toEqual({ batchItemFailures: [{ itemIdentifier: failing.dynamodb!.SequenceNumber }] });
-      expect(sent.map((e) => e.to)).toEqual(["ok@example.com", "sisi@example.com"]);
+      // The failing sign-up's admin email went first; the retry sends it again.
+      expect(sent.map((e) => e.to)).toEqual(["sisi@example.com", "ok@example.com", "sisi@example.com"]);
     });
 
     it("logs the failure with the user's id but no one's address", async () => {
-      const { handler, logs } = setup(["bad@example.com"]);
+      const { handler, logs } = setup({ "bad@example.com": "TooManyRequestsException" });
 
       await handler(streamEvent(record(undefined, profile({ id: "u-9", email: "bad@example.com" }))));
 
@@ -152,4 +159,41 @@ describe("the notify Lambda", () => {
       expect(JSON.stringify(logs)).not.toContain("sisi@example.com");
     });
   });
+
+  describe.each(["MessageRejected", "BadRequestException"])(
+    "given a send SES refuses outright (%s), such as to an unverified address in the sandbox",
+    (errorName) => {
+      it("skips that email without a retry and sends the rest, including the admin's", async () => {
+        const { handler, sent } = setup({ "bad@example.com": errorName });
+
+        const res = await handler(
+          streamEvent(
+            record(undefined, profile({ id: "u-1", email: "bad@example.com" })),
+            record(undefined, profile({ id: "u-2", email: "ok@example.com" })),
+          ),
+        );
+
+        expect(res).toEqual({ batchItemFailures: [] });
+        expect(sent.map((e) => [e.subject, e.to])).toEqual([
+          [expect.stringMatching(/new ledger sign-up/i), "sisi@example.com"],
+          [expect.stringMatching(/new ledger sign-up/i), "sisi@example.com"],
+          [expect.stringMatching(/waiting for approval/i), "ok@example.com"],
+        ]);
+      });
+
+      it("logs it as rejected, with the user's id but not the address", async () => {
+        const { handler, logs } = setup({ "bad@example.com": errorName });
+
+        await handler(streamEvent(record(undefined, profile({ id: "u-7", email: "bad@example.com" }))));
+
+        expect(logs.find((l) => l.event === "email_rejected")).toMatchObject({
+          kind: "pending",
+          userId: "u-7",
+          error: { name: errorName },
+        });
+        expect(logs.some((l) => l.event === "notify_failed")).toBe(false);
+        expect(JSON.stringify(logs)).not.toContain("bad@example.com");
+      });
+    },
+  );
 });

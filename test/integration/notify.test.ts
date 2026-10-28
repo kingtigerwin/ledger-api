@@ -49,8 +49,8 @@ describe("emails from the Users table's stream", () => {
 
       expect(res.batchItemFailures).toEqual([]);
       expect(sent.map((e) => [e.to, e.subject])).toEqual([
-        ["haoran@example.com", expect.stringMatching(/waiting for approval/i)],
         ["sisi@example.com", expect.stringMatching(/haoran/)],
+        ["haoran@example.com", expect.stringMatching(/waiting for approval/i)],
         ["haoran@example.com", expect.stringMatching(/approved/i)],
       ]);
     });
