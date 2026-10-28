@@ -21,7 +21,7 @@ afterAll(async () => {
 
 describe("emails from the Users table's stream", () => {
   describe("given a customer who registers, fails a login, and is enabled, disabled and enabled again", () => {
-    it("emails them once when they register and once when first approved", async () => {
+    it("emails them when they register and when first approved, and the admin when they register", async () => {
       const auth = createAuthHandler({ tableName, signingSecret: "test-secret", now: () => new Date() });
       const admin = createAdminHandler({ tableName });
       const registered = await call(auth, "POST /api/v1/auth/register", {
@@ -39,6 +39,8 @@ describe("emails from the Users table's stream", () => {
       const sent: OutgoingEmail[] = [];
       const notify = createNotifyHandler({
         from: "noreply@haoran.cloud",
+        adminEmail: "sisi@example.com",
+        apiUrl: "https://api.haoran.cloud",
         sendEmail: async (email) => void sent.push(email),
         log: () => {},
       });
@@ -48,6 +50,7 @@ describe("emails from the Users table's stream", () => {
       expect(res.batchItemFailures).toEqual([]);
       expect(sent.map((e) => [e.to, e.subject])).toEqual([
         ["haoran@example.com", expect.stringMatching(/waiting for approval/i)],
+        ["sisi@example.com", expect.stringMatching(/haoran/)],
         ["haoran@example.com", expect.stringMatching(/approved/i)],
       ]);
     });

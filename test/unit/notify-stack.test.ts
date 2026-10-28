@@ -22,7 +22,12 @@ describe("given an email sender in the custom domain", () => {
   beforeAll(() => {
     const app = new App();
     template = Template.fromStack(
-      new LedgerStack(app, "LedgerApi", { env, customDomain: customDomain(app), emailFrom: "noreply@example.cloud" }),
+      new LedgerStack(app, "LedgerApi", {
+        env,
+        customDomain: customDomain(app),
+        emailFrom: "noreply@example.cloud",
+        adminEmail: "sisi@example.com",
+      }),
     );
   });
 
@@ -51,7 +56,12 @@ describe("given an email sender in the custom domain", () => {
     const [, notify] = Object.entries(template.findResources("AWS::Lambda::Function")).find(([id]) =>
       id.startsWith("NotifyFunction"),
     )!;
-    expect(notify.Properties.Environment.Variables).toEqual({ EMAIL_FROM: "noreply@example.cloud" });
+    // The admin's address comes from deploy-time context (a GitHub variable), never from source.
+    expect(notify.Properties.Environment.Variables).toEqual({
+      EMAIL_FROM: "noreply@example.cloud",
+      ADMIN_EMAIL: "sisi@example.com",
+      API_URL: "https://api.example.cloud",
+    });
     template.hasResourceProperties("AWS::Lambda::EventSourceMapping", {
       FunctionName: Match.anyValue(),
       StartingPosition: "LATEST",
@@ -89,6 +99,20 @@ describe("given an email sender in the custom domain", () => {
     });
     // Five alarms: still within CloudWatch's free 10.
     template.resourceCountIs("AWS::CloudWatch::Alarm", 5);
+  });
+});
+
+describe("given an email sender but no admin address", () => {
+  it("emails customers only", () => {
+    const app = new App();
+    const template = Template.fromStack(
+      new LedgerStack(app, "LedgerApi", { env, customDomain: customDomain(app), emailFrom: "noreply@example.cloud" }),
+    );
+
+    const [, notify] = Object.entries(template.findResources("AWS::Lambda::Function")).find(([id]) =>
+      id.startsWith("NotifyFunction"),
+    )!;
+    expect(notify.Properties.Environment.Variables).not.toHaveProperty("ADMIN_EMAIL");
   });
 });
 
