@@ -15,7 +15,15 @@ if (customDomain) {
     crossRegionReferences: true,
     domain: customDomain,
   });
-  new LedgerStack(app, "LedgerApi", { env, crossRegionReferences: true, customDomain: { ...customDomain, certificate } });
+  new LedgerStack(app, "LedgerApi", {
+    env,
+    crossRegionReferences: true,
+    customDomain: { ...customDomain, certificate },
+    // Optional: email customers from this address in the domain's zone (see cdk.json).
+    emailFrom: app.node.tryGetContext("emailFrom") || undefined,
+    // A personal address, so it comes from a GitHub variable at deploy time, not cdk.json.
+    adminEmail: app.node.tryGetContext("adminEmail") || undefined,
+  });
 } else {
   new LedgerStack(app, "LedgerApi", { env });
 }

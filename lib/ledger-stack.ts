@@ -15,13 +15,16 @@ import {
 import { HttpOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { Alarm, ComparisonOperator, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
-import { AttributeType, Billing, TableV2 } from "aws-cdk-lib/aws-dynamodb";
+import { AttributeType, Billing, StreamViewType, TableV2 } from "aws-cdk-lib/aws-dynamodb";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
-import { Architecture, LoggingFormat, Runtime } from "aws-cdk-lib/aws-lambda";
+import { Architecture, FilterCriteria, FilterRule, LoggingFormat, Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
+import { DynamoEventSource, SqsDlq } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction, type NodejsFunctionProps } from "aws-cdk-lib/aws-lambda-nodejs";
 import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
+import { EmailIdentity, Identity } from "aws-cdk-lib/aws-ses";
+import { Queue } from "aws-cdk-lib/aws-sqs";
 import { Provider } from "aws-cdk-lib/custom-resources";
 import type { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 import { AaaaRecord, ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
@@ -37,17 +40,35 @@ const PUBLIC_AUTH_ROUTES = ["register", "login", "refresh", "logout"].map((name)
 export interface LedgerStackProps extends StackProps {
   /** Serve the API on this name as well as the CloudFront domain; the certificate comes from CertificateStack. */
   customDomain?: CustomDomain & { certificate: ICertificate };
+  /**
+   * Email customers from this address when they register and when first approved. It must be in
+   * the custom domain's zone, which is where SES's DKIM records go.
+   */
+  emailFrom?: string;
+  /** Where to send each sign-up for approval (the admin's own address). Needs emailFrom. */
+  adminEmail?: string;
 }
 
 export class LedgerStack extends Stack {
   constructor(scope: Construct, id: string, props?: LedgerStackProps) {
     super(scope, id, props);
 
+    const customDomain = props?.customDomain;
+    const emailFrom = props?.emailFrom;
+    if (emailFrom && !customDomain) {
+      throw new Error("emailFrom needs customDomain: SES verifies the sender's domain through its hosted zone");
+    }
+    if (emailFrom && customDomain && emailFrom.split("@")[1] !== customDomain.zoneName) {
+      throw new Error(`emailFrom must be an address at ${customDomain.zoneName}, the custom domain's zone`);
+    }
+
     const usersTable = new TableV2(this, "UsersTable", {
       partitionKey: { name: usersTableKeys.partitionKey, type: AttributeType.STRING },
       sortKey: { name: usersTableKeys.sortKey, type: AttributeType.STRING },
       billing: Billing.onDemand(),
       timeToLiveAttribute: "ttl",
+      // Feeds the notify Lambda; reading a stream from Lambda is free.
+      dynamoStream: emailFrom ? StreamViewType[usersTableKeys.streamViewType] : undefined,
     });
 
     const dataTable = new TableV2(this, "DataTable", {
@@ -205,19 +226,20 @@ export class LedgerStack extends Stack {
       // Forwards the Authorization header, cookies and query strings.
       originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
     };
-    const customDomain = props?.customDomain;
     const distribution = new Distribution(this, "Cdn", {
       defaultBehavior: apiBehavior,
       additionalBehaviors: { "/api/*": apiBehavior },
       priceClass: PriceClass.PRICE_CLASS_100,
       ...(customDomain ? { domainNames: [customDomain.domainName], certificate: customDomain.certificate } : {}),
     });
-    if (customDomain) {
-      // Only adds the API's own records; the zone and its other records belong to whoever manages the domain.
-      const zone = HostedZone.fromHostedZoneAttributes(this, "Zone", {
+    // Only adds the API's own records (and SES's); the zone and its other records belong to whoever manages the domain.
+    const zone =
+      customDomain &&
+      HostedZone.fromHostedZoneAttributes(this, "Zone", {
         zoneName: customDomain.zoneName,
         hostedZoneId: customDomain.hostedZoneId,
       });
+    if (customDomain && zone) {
       const target = RecordTarget.fromAlias(new CloudFrontTarget(distribution));
       const recordName = customDomain.domainName;
       new ARecord(this, "ApiAliasIpv4", { zone, recordName, target });
@@ -228,7 +250,7 @@ export class LedgerStack extends Stack {
       value: `https://${customDomain?.domainName ?? distribution.distributionDomainName}`,
     });
 
-    // Four alarms keeps within CloudWatch's free 10. The Lambda ones use the account-wide
+    // Four alarms (five with emails on) keeps within CloudWatch's free 10. The Lambda ones use the account-wide
     // metrics (one alarm each instead of one per function), so they also cover any other
     // Lambdas in this account and region.
     const alarmTopic = new Topic(this, "AlarmTopic");
@@ -254,6 +276,42 @@ export class LedgerStack extends Stack {
       new Alarm(this, `${name}Alarm`, {
         metric: metric.with({ statistic: "Sum", period: fiveMinutes }),
         threshold,
+        evaluationPeriods: 1,
+        comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: TreatMissingData.NOT_BREACHING,
+      }).addAlarmAction(new SnsAction(alarmTopic));
+    }
+
+    // Customers' account emails: the Users table's stream drives a Lambda that sends through SES.
+    // Sends that still fail after three retries land in a queue, and its alarm says so.
+    if (emailFrom && zone) {
+      // Easy DKIM: SES adds its three CNAME records to the zone and verifies the domain itself.
+      const identity = new EmailIdentity(this, "EmailIdentity", { identity: Identity.publicHostedZone(zone) });
+      const notifyFunction = makeFunction("Notify", "notify/lambda.ts", {
+        memorySize: 128,
+        environment: {
+          EMAIL_FROM: emailFrom,
+          ...(props?.adminEmail ? { ADMIN_EMAIL: props.adminEmail } : {}),
+          API_URL: `https://${customDomain!.domainName}`,
+        },
+      });
+      identity.grantSendEmail(notifyFunction);
+
+      const failed = new Queue(this, "NotifyFailures", { retentionPeriod: Duration.days(14) });
+      notifyFunction.addEventSource(
+        new DynamoEventSource(usersTable, {
+          startingPosition: StartingPosition.LATEST,
+          // Refresh tokens, username claims and lockouts never reach the function.
+          filters: [FilterCriteria.filter({ dynamodb: { Keys: { sk: { S: FilterRule.isEqual("PROFILE") } } } })],
+          reportBatchItemFailures: true,
+          retryAttempts: 3,
+          bisectBatchOnError: true,
+          onFailure: new SqsDlq(failed),
+        }),
+      );
+      new Alarm(this, "NotifyFailuresAlarm", {
+        metric: failed.metricApproximateNumberOfMessagesVisible({ statistic: "Maximum", period: fiveMinutes }),
+        threshold: 1,
         evaluationPeriods: 1,
         comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
         treatMissingData: TreatMissingData.NOT_BREACHING,

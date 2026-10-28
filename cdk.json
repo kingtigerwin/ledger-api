@@ -5,6 +5,7 @@
   },
   "context": {
     "alarmEmail": "",
+    "emailFrom": "noreply@haoran.cloud",
     "customDomain": { "domainName": "api.haoran.cloud", "zoneName": "haoran.cloud", "hostedZoneId": "Z5UXKBB5IU578" }
   }
 }

@@ -1,7 +1,7 @@
 import { ApiError, authContext, json, noContent, parseBody, withErrors } from "../http";
 import { log as defaultLog, type Logger } from "../log";
 import { hashPassword, verifyPassword } from "./password";
-import { credentialsSchema, loginSchema } from "./schemas";
+import { loginSchema, registerSchema } from "./schemas";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import {
   clearRefreshCookie,
@@ -71,10 +71,12 @@ export function createAuthHandler(deps: AuthDeps) {
   return withErrors(async (event) => {
     switch (event.routeKey) {
       case "POST /api/v1/auth/register": {
-        const { username, password } = parseBody(event, credentialsSchema);
+        const { username, password, email } = parseBody(event, registerSchema);
         try {
+          // The Users table's stream tells the notify Lambda, which emails them that they're waiting for approval.
           const user = await users.create({
             username,
+            email,
             passwordHash: await hashPassword(password),
             role: "customer",
             status: "pending",
@@ -136,8 +138,8 @@ export function createAuthHandler(deps: AuthDeps) {
       case "GET /api/v1/auth/me": {
         const user = await users.getById(authContext(event).userId);
         if (!user) throw new ApiError(401, "unauthorized", "Sign in first");
-        const { id, username, role, status } = user;
-        return json(200, { id, username, role, status });
+        const { id, username, email, role, status } = user;
+        return json(200, { id, username, email, role, status });
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);

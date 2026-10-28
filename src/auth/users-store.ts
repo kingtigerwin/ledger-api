@@ -23,6 +23,8 @@ export type UserStatus = "pending" | "active" | "disabled";
 export interface User {
   id: string;
   username: string;
+  /** Customers give one when they register; the bootstrap admin and earlier users have none. */
+  email?: string;
   role: Role;
   status: UserStatus;
   createdAt: string;
@@ -52,10 +54,18 @@ const refreshTokenItem = (userId: string, tokenHash: string, expiresAt: Date) =>
 export function createUsersStore(tableName: string) {
   return {
     /** Creates the user and claims the username in one transaction, so two users can never share a name. */
-    async create(input: { username: string; passwordHash: string; role: Role; status: UserStatus; now: Date }): Promise<User> {
+    async create(input: {
+      username: string;
+      email?: string;
+      passwordHash: string;
+      role: Role;
+      status: UserStatus;
+      now: Date;
+    }): Promise<User> {
       const user: User = {
         id: randomUUID(),
         username: input.username,
+        email: input.email,
         role: input.role,
         status: input.status,
         createdAt: input.now.toISOString(),
@@ -98,8 +108,13 @@ export function createUsersStore(tableName: string) {
         new GetCommand({ TableName: tableName, Key: profileKey(claim.userId as string), ConsistentRead: true }),
       );
       if (!Item) return undefined;
-      const { id, role, status, createdAt, passwordHash, failedLogins = 0, lockedUntil } = Item;
-      return { user: { id, username: Item.username, role, status, createdAt }, passwordHash, failedLogins, lockedUntil };
+      const { id, email, role, status, createdAt, passwordHash, failedLogins = 0, lockedUntil } = Item;
+      return {
+        user: { id, username: Item.username, email, role, status, createdAt },
+        passwordHash,
+        failedLogins,
+        lockedUntil,
+      };
     },
 
     /** Counts a failed login; the fifth in a row locks the user for 15 minutes and starts the count again. */
@@ -145,8 +160,8 @@ export function createUsersStore(tableName: string) {
             ExclusiveStartKey: startKey,
           }),
         );
-        for (const { id, username, role, status, createdAt } of page.Items ?? []) {
-          users.push({ id, username, role, status, createdAt });
+        for (const { id, username, email, role, status, createdAt } of page.Items ?? []) {
+          users.push({ id, username, email, role, status, createdAt });
         }
         startKey = page.LastEvaluatedKey;
       } while (startKey);
@@ -158,8 +173,8 @@ export function createUsersStore(tableName: string) {
         new GetCommand({ TableName: tableName, Key: profileKey(userId), ConsistentRead: true }),
       );
       if (!Item) return undefined;
-      const { id, username, role, status, createdAt } = Item;
-      return { id, username, role, status, createdAt };
+      const { id, username, email, role, status, createdAt } = Item;
+      return { id, username, email, role, status, createdAt };
     },
 
     /** The ID of the user who holds `username`, from its claim alone (no profile or password hash read). */
@@ -200,8 +215,8 @@ export function createUsersStore(tableName: string) {
             ReturnValues: "ALL_NEW",
           }),
         );
-        const { id, username, role, createdAt } = Attributes!;
-        return { id, username, role, status, createdAt };
+        const { id, username, email, role, createdAt } = Attributes!;
+        return { id, username, email, role, status, createdAt };
       } catch (err) {
         if (err instanceof Error && err.name === "ConditionalCheckFailedException") throw new UserNotFoundError();
         throw err;
