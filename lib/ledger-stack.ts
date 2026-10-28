@@ -45,6 +45,8 @@ export interface LedgerStackProps extends StackProps {
    * the custom domain's zone, which is where SES's DKIM records go.
    */
   emailFrom?: string;
+  /** Where to send each sign-up for approval (the admin's own address). Needs emailFrom. */
+  adminEmail?: string;
 }
 
 export class LedgerStack extends Stack {
@@ -287,7 +289,11 @@ export class LedgerStack extends Stack {
       const identity = new EmailIdentity(this, "EmailIdentity", { identity: Identity.publicHostedZone(zone) });
       const notifyFunction = makeFunction("Notify", "notify/lambda.ts", {
         memorySize: 128,
-        environment: { EMAIL_FROM: emailFrom },
+        environment: {
+          EMAIL_FROM: emailFrom,
+          ...(props?.adminEmail ? { ADMIN_EMAIL: props.adminEmail } : {}),
+          API_URL: `https://${customDomain!.domainName}`,
+        },
       });
       identity.grantSendEmail(notifyFunction);
 

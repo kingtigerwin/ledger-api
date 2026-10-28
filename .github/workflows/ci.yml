@@ -31,6 +31,7 @@ jobs:
   #   secret   SMOKE_TEST_PASSWORD  (password for the smoke-test user)
   #   variable DEPLOY_ENABLED       ("true" once the above are set; job-level `if` can't read secrets)
   #   variable ALARM_EMAIL          (where alarms are emailed; optional)
+  #   variable ADMIN_EMAIL          (where sign-ups are emailed for approval; optional)
   deploy:
     # Skipped until the one-time setup in README.md is done.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
@@ -57,9 +58,10 @@ jobs:
           # Also hides the account ID wherever later steps print it (e.g. ARNs in cdk output).
           mask-aws-account-id: true
       - name: Deploy
-        run: npx cdk deploy LedgerApi --require-approval never -c alarmEmail="$ALARM_EMAIL" --outputs-file cdk-outputs.json
+        run: npx cdk deploy LedgerApi --require-approval never -c alarmEmail="$ALARM_EMAIL" -c adminEmail="$ADMIN_EMAIL" --outputs-file cdk-outputs.json
         env:
           ALARM_EMAIL: ${{ vars.ALARM_EMAIL }}
+          ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
       - name: Smoke test
         run: API_URL="$(jq -r .LedgerApi.ApiUrl cdk-outputs.json)" npm run smoke
         env:
