@@ -7,6 +7,7 @@ export const handler = createNotifyHandler({
   from: process.env.EMAIL_FROM!,
   adminEmail: process.env.ADMIN_EMAIL || undefined,
   apiUrl: process.env.API_URL!,
+  adminPageUrl: process.env.ADMIN_PAGE_URL || undefined,
   sendEmail: async ({ from, to, subject, text }) => {
     await ses.send(
       new SendEmailCommand({

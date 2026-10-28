@@ -47,6 +47,8 @@ export interface LedgerStackProps extends StackProps {
   emailFrom?: string;
   /** Where to send each sign-up for approval (the admin's own address). Needs emailFrom. */
   adminEmail?: string;
+  /** ledger-ui's admin page, linked from the admin's sign-up email. Without it the email gives the API calls. */
+  adminPageUrl?: string;
 }
 
 export class LedgerStack extends Stack {
@@ -305,6 +307,7 @@ export class LedgerStack extends Stack {
           EMAIL_FROM: emailFrom,
           ...(props?.adminEmail ? { ADMIN_EMAIL: props.adminEmail } : {}),
           API_URL: `https://${customDomain!.domainName}`,
+          ...(props?.adminPageUrl ? { ADMIN_PAGE_URL: props.adminPageUrl } : {}),
         },
       });
       // SES checks the permission on the configuration set, and on every identity involved: the

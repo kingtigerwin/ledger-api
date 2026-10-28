@@ -23,6 +23,8 @@ if (customDomain) {
     emailFrom: app.node.tryGetContext("emailFrom") || undefined,
     // A personal address, so it comes from a GitHub variable at deploy time, not cdk.json.
     adminEmail: app.node.tryGetContext("adminEmail") || undefined,
+    // Optional: ledger-ui's admin page, for the admin's approve or reject link (see cdk.json).
+    adminPageUrl: app.node.tryGetContext("adminPageUrl") || undefined,
   });
 } else {
   new LedgerStack(app, "LedgerApi", { env });
