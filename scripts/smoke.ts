@@ -77,7 +77,8 @@ function newUlid(): string {
 
 async function main() {
   expectStatus("register smoke-test (or already exists)", await api("POST", "/auth/register", {
-    body: { username: SMOKE_USER, password: SMOKE_PASSWORD },
+    // SES's mailbox simulator: accepts the emails without delivering them, and isn't charged.
+    body: { username: SMOKE_USER, password: SMOKE_PASSWORD, email: "success@simulator.amazonses.com" },
   }), 201, 409);
 
   let session = await login(SMOKE_USER, SMOKE_PASSWORD);

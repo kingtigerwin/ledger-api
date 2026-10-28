@@ -1,28 +1,28 @@
 # ledger-api design
 
-A public API where customers record their spending. It's a learning and portfolio project focused on serverless AWS and on handling the data correctly. Target cost: $0/month.
+A public API where customers record their spending. It's a learning and portfolio project focused on serverless AWS and on handling the data correctly. Target cost: $0/month. The one exception is SES sending after its first year (see Account emails), a few cents a month at this scale.
 
 ## Stack
 
 - TypeScript, AWS CDK, Lambda (Node 22, arm64), API Gateway HTTP API, DynamoDB (on-demand).
 - CloudFront in front of the API at `/api/*` (no S3 origin in this stack; a UI may be added later as another origin).
 - Region `ap-southeast-2`. The app is one stack, `LedgerApi`; with a custom domain, a small `LedgerApiCertificate` stack in `us-east-1` holds its ACM certificate (CloudFront only accepts certificates from there), passed across with CDK cross-region references.
-- Custom domain: `api.haoran.cloud`, in the existing `haoran.cloud` Route 53 zone (which also serves another site). Configured in `cdk.json` (`customDomain`); the zone is imported by ID, never looked up (a lookup would put the account ID in `cdk.context.json`) and never modified apart from the API's `A`/`AAAA` alias records and ACM's validation record. The CloudFront domain keeps working.
+- Custom domain: `api.haoran.cloud`, in the existing `haoran.cloud` Route 53 zone (which also serves another site). Configured in `cdk.json` (`customDomain`); the zone is imported by ID, never looked up (a lookup would put the account ID in `cdk.context.json`) and never modified apart from the API's `A`/`AAAA` alias records, ACM's validation record and SES's three DKIM `CNAME` records. The CloudFront domain keeps working.
 - Secrets (JWT signing secret, root admin password) are SSM Parameter Store `SecureString`s, created once by a CDK custom resource and never overwritten. They are never in source.
 
 ## Auth
 
-- `POST /api/v1/auth/register`: anyone can sign up. New users are `pending` until an admin enables them.
+- `POST /api/v1/auth/register`: anyone can sign up with a username, password and email address. New users are `pending` until an admin enables them; both steps are emailed (see Account emails).
 - Root admin `sisi` is created on first deploy with a random password stored in SSM (`/ledger-api/admin-password`). A CDK custom resource runs the bootstrap: it creates only what's missing (the signing secret, the admin password, the admin user) and never overwrites anything. The API stage waits for it. Read the password with `aws ssm get-parameter --name /ledger-api/admin-password --with-decryption`.
 - Passwords are hashed with scrypt (`node:crypto`), stored as `scrypt$N$r$p$salt$hash` and compared with `timingSafeEqual`.
-- Input limits: username and password must be non-empty, at most 64 and 1,024 characters respectively. Usernames are unique and stored lowercase. No other password policy.
+- Input limits: username and password must be non-empty, at most 64 and 1,024 characters respectively. Usernames are unique and stored lowercase. No other password policy. The email must be a valid address of at most 254 characters; it isn't unique, isn't used to sign in, and isn't verified (a mistyped one just bounces).
 - `POST /api/v1/auth/login` returns a 15-minute HS256 access token with claims `sub`, `role` (`admin` | `customer`) and `scope`. Failed logins always return the same "invalid username or password" error.
 - Refresh tokens last 7 days and are replaced on every use. Only their SHA-256 hash is stored, under `USER#<id>` / `REFRESH#<hash>`, with a DynamoDB TTL for cleanup (expiry is also checked in code, since TTL deletion can lag).
   - Login delivers the refresh token as an `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth` cookie by default. A non-browser client (a future agent) sends `"refreshTokenIn": "body"` to get it in the JSON body instead, and then sends it back in the body.
   - `POST /api/v1/auth/refresh` answers in the same channel the token arrived in.
   - Replaying a refresh token that was already replaced revokes all of that user's refresh tokens, since it was probably copied.
 - `POST /api/v1/auth/logout` deletes the presented refresh token and clears the cookie; it succeeds even without a token.
-- `GET /api/v1/auth/me` returns the signed-in user.
+- `GET /api/v1/auth/me` returns the signed-in user: `id`, `username`, `email`, `role`, `status`. The admin's user list includes `email` too. Users from before emails, and the bootstrap admin, have none.
 - A custom Lambda authorizer (simple responses) validates the bearer access token on every other route and passes `userId`, `role` and `scope` to it. Results are cached for 60 seconds, so an expired token works for at most a minute longer.
 - Abuse protection: API Gateway throttling on the stage, tighter on `/auth/*`; 5 failed logins lock a username for 15 minutes.
 
@@ -68,7 +68,7 @@ An expense (no income records), owned by the customer who recorded it. There are
 
 ### Tables
 
-- `Users`: users, username uniqueness items, refresh tokens, lockout counters.
+- `Users`: users (with their email), username uniqueness items, refresh tokens, lockout counters. With emails on, it streams new and old images to the notify Lambda.
 - `Data`: transactions, keyed by customer. Transactions sort by `date#id`. Two secondary indexes: `byCategory` (`gsi2pk`/`gsi2sk`, names kept from when a by-member `gsi1` index existed) filters one customer's transactions by category; `allByDate` (`gsi3pk = TXN`, `gsi3sk = date#id`) lists every customer's transactions for the admin. One partition is fine at household scale.
 
 ## Endpoints
@@ -101,6 +101,30 @@ Each customer tool mirrors a Transactions route and acts on the signed-in user's
 
 The rules live in `src/data/ledger.ts`, which both `src/data/handler.ts` (REST) and `src/mcp/handler.ts` call. The agent puts today's date, in the customer's time zone, into Claude's prompt, so "today" resolves to a real date. The admin's write routes (edit or delete any customer's transaction) and the user-management routes are not exposed over MCP.
 
+## Account emails
+
+A customer gets two emails, from `noreply@haoran.cloud` (`emailFrom` in `cdk.json`):
+
+| When | Email |
+|---|---|
+| They register (a new `pending` customer) | "Your Ledger account is waiting for approval" |
+| The admin enables them for the first time (`pending` → `active`) | "Your Ledger account is approved", saying they can sign in |
+
+Nothing is sent when a disabled customer is enabled again, when a pending customer is disabled, for the admin, or for users without an email. Emails are plain text.
+
+```text
+register / enable  →  Users table PROFILE item  →  DynamoDB Stream  →  Notify Lambda  →  SES
+                                                                        └ fails 3 retries → SQS queue → alarm
+```
+
+- The handlers don't send anything: the Users table's stream (new and old images) drives `src/notify/`. Registration never fails because of email, and every way a user changes is covered. A Lambda event filter passes only `PROFILE` items, so refresh tokens, username claims and lockouts don't invoke it. `src/notify/emails.ts` decides which email a change calls for.
+- Records are handled in order. On the first failed send the Lambda reports that record (`ReportBatchItemFailures`), so the stream retries from there; after 3 retries the batch goes to an SQS queue (kept 14 days) and an alarm fires. Delivery is at least once: a timeout mid-batch can repeat an email.
+- SES verifies `haoran.cloud` with Easy DKIM: CDK adds the three `CNAME` records to the existing zone. The Notify Lambda may only `ses:SendEmail`/`SendRawEmail` from that identity. `emailFrom` must be in the custom domain's zone, and without it no stream, Lambda, identity or queue is created.
+- New SES accounts are in the sandbox (200 emails a day, only to verified addresses) until production access is requested in the SES console, once, by hand.
+- Email addresses are personal data: `src/log.ts` redacts `email` fields, and the Lambda logs only the user's ID and the email kind, scrubbing the address out of SES error messages.
+- Cost: the stream, Lambda, queue and alarm are free. SES gives 3,000 emails a month free for the first 12 months, then $0.10 per 1,000 (two per customer). This is the project's only cost above $0.
+- The register route is public, so someone could sign up with another person's address and send them the "waiting for approval" email. Throttling on `/auth/*` limits how often; verifying the address first would be the fix if it's abused.
+
 ## Conventions
 
 - Lists return `{ items, nextCursor }`. The cursor is DynamoDB's `LastEvaluatedKey`, encoded and signed so it can't be tampered with.
@@ -115,8 +139,8 @@ The rules live in `src/data/ledger.ts`, which both `src/data/handler.ts` (REST) 
   - The deploy role is in a separate `LedgerApiCiAccess` stack deployed once by hand. Only `repo:kingtigerwin@9473411/ledger-api@1434244010:ref:refs/heads/main` (GitHub's immutable subject format, with owner and repo IDs) can assume it, and it can only assume CDK's bootstrap roles (`cdk-hnb659fds-*`) and read the admin password for the smoke test.
 - CloudFront sends `/api/*` (and, for now, the default behaviour) to API Gateway with caching disabled and the `AllViewerExceptHostHeader` origin request policy, so `Authorization`, cookies and query strings reach the API. The raw `execute-api` URL also stays reachable; blocking it would need WAF or a shared-secret header.
 - Lambda JSON logs kept for 2 weeks. All logging goes through `src/log.ts`, which redacts passwords, tokens, cookies and `Authorization` headers.
-- Four CloudWatch alarms (within the free 10), emailing the address in the `alarmEmail` CDK context value (GitHub variable `ALARM_EMAIL`) via SNS: API 5xx ≥ 1, Lambda errors ≥ 1 and throttles ≥ 1 (account-wide metrics, so they also cover other Lambdas in the account and region), and ≥ 20 failed logins in 5 minutes.
-- The smoke test reuses one user, `smoke-test` (password in the GitHub secret `SMOKE_TEST_PASSWORD`), which the admin approves on its first run. It runs a transaction through REST and another through every MCP tool, and deletes both.
+- Four CloudWatch alarms, five with account emails on (within the free 10), emailing the address in the `alarmEmail` CDK context value (GitHub variable `ALARM_EMAIL`) via SNS: API 5xx ≥ 1, Lambda errors ≥ 1 and throttles ≥ 1 (account-wide metrics, so they also cover other Lambdas in the account and region), and ≥ 20 failed logins in 5 minutes; with emails on, also any email that still failed after its retries (the notify queue isn't empty).
+- The smoke test reuses one user, `smoke-test` (password in the GitHub secret `SMOKE_TEST_PASSWORD`), which the admin approves on its first run. It registers with `success@simulator.amazonses.com`, SES's mailbox simulator, so its emails cost nothing and reach no one. It runs a transaction through REST and another through every MCP tool, and deletes both.
 
 ## Testing
 
@@ -126,4 +150,4 @@ The rules live in `src/data/ledger.ts`, which both `src/data/handler.ts` (REST) 
 
 ## Out of scope for now
 
-UI and its deployment, the agent (its own repo), OAuth discovery for MCP clients such as claude.ai connectors, multiple currencies, income records, custom categories, password reset, WAF, X-Ray.
+UI and its deployment, the agent (its own repo), OAuth discovery for MCP clients such as claude.ai connectors, multiple currencies, income records, custom categories, password reset, email verification, HTML emails, bounce and complaint handling (SES's account-level suppression list covers it for now), WAF, X-Ray.
