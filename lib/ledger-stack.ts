@@ -295,7 +295,7 @@ export class LedgerStack extends Stack {
         events: [EmailSendingEvent.BOUNCE, EmailSendingEvent.COMPLAINT],
       });
       // Easy DKIM: SES adds its three CNAME records to the zone and verifies the domain itself.
-      const identity = new EmailIdentity(this, "EmailIdentity", {
+      new EmailIdentity(this, "EmailIdentity", {
         identity: Identity.publicHostedZone(zone),
         configurationSet,
       });
@@ -307,14 +307,17 @@ export class LedgerStack extends Stack {
           API_URL: `https://${customDomain!.domainName}`,
         },
       });
-      // Sending with a configuration set needs the permission on it as well as on the identity.
+      // SES checks the permission on the configuration set, and on every identity involved: the
+      // domain, and in the sandbox each verified recipient (the admin's address). So any identity in
+      // this account and region, but only ever sending as emailFrom.
       notifyFunction.addToRolePolicy(
         new PolicyStatement({
           actions: ["ses:SendEmail", "ses:SendRawEmail"],
           resources: [
-            identity.emailIdentityArn,
+            this.formatArn({ service: "ses", resource: "identity", resourceName: "*" }),
             this.formatArn({ service: "ses", resource: "configuration-set", resourceName: configurationSet.configurationSetName }),
           ],
+          conditions: { StringEquals: { "ses:FromAddress": emailFrom } },
         }),
       );
 
