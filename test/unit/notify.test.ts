@@ -42,6 +42,16 @@ describe("emailsFor", () => {
       expect(rest).toEqual([]);
     });
 
+    it("links the admin to the admin page, when there is one, instead of the API calls", () => {
+      const [admin] = emailsFor(undefined, profile(), { ...SETTINGS, adminPageUrl: "https://ledger.haoran.cloud/admin" });
+
+      expect(admin?.kind).toBe("new_signup");
+      expect(admin?.text).toContain("https://ledger.haoran.cloud/admin");
+      expect(admin?.text).toMatch(/approve or reject/i);
+      expect(admin?.text).toContain("haoran@example.com");
+      expect(admin?.text).not.toContain("POST");
+    });
+
     it("emails only the customer when no admin address is set", () => {
       const emails = emailsFor(undefined, profile(), { apiUrl: SETTINGS.apiUrl });
 
