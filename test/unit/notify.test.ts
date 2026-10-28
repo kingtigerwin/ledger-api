@@ -79,7 +79,8 @@ function setup(failFor: string[] = []) {
   const handler = createNotifyHandler({
     from: FROM,
     sendEmail: async (email) => {
-      if (failFor.includes(email.to)) throw new Error("SES is unavailable");
+      // As SES words it in the sandbox: the error names the address.
+      if (failFor.includes(email.to)) throw new Error(`Email address is not verified: ${email.to}`);
       sent.push(email);
     },
     log: (entry) => logs.push(entry),

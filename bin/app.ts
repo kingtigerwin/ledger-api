@@ -15,7 +15,13 @@ if (customDomain) {
     crossRegionReferences: true,
     domain: customDomain,
   });
-  new LedgerStack(app, "LedgerApi", { env, crossRegionReferences: true, customDomain: { ...customDomain, certificate } });
+  new LedgerStack(app, "LedgerApi", {
+    env,
+    crossRegionReferences: true,
+    customDomain: { ...customDomain, certificate },
+    // Optional: email customers from this address in the domain's zone (see cdk.json).
+    emailFrom: app.node.tryGetContext("emailFrom") || undefined,
+  });
 } else {
   new LedgerStack(app, "LedgerApi", { env });
 }

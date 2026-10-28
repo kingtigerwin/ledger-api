@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { statusQuery } from "./admin/schemas";
-import { credentialsSchema, loginSchema } from "./auth/schemas";
+import { loginSchema, registerSchema } from "./auth/schemas";
 import {
   createTransactionSchema,
   listQuerySchema,
@@ -24,7 +24,7 @@ const refreshBody = z.object({ refreshToken: z.string().optional() });
 
 // Every route the stack deploys; a unit test checks the two lists match.
 const operations: Operation[] = [
-  { method: "post", path: "/api/v1/auth/register", operationId: "register", summary: "Sign up; the account stays pending until an admin enables it", body: credentialsSchema, public: true },
+  { method: "post", path: "/api/v1/auth/register", operationId: "register", summary: "Sign up; the account stays pending until an admin enables it, and both steps are emailed", body: registerSchema, public: true },
   { method: "post", path: "/api/v1/auth/login", operationId: "login", summary: "Log in; returns an access token and a refresh token (cookie, or body if refreshTokenIn is \"body\")", body: loginSchema, public: true },
   { method: "post", path: "/api/v1/auth/refresh", operationId: "refreshTokens", summary: "Swap a refresh token (cookie or body) for new tokens", body: refreshBody, public: true },
   { method: "post", path: "/api/v1/auth/logout", operationId: "logout", summary: "End the session's refresh token", body: refreshBody, public: true },

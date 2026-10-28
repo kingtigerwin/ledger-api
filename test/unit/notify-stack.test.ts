@@ -27,9 +27,10 @@ describe("given an email sender in the custom domain", () => {
   });
 
   it("verifies the domain with SES, adding its DKIM records to the existing zone", () => {
+    // DKIM signing is SES's default, so it is left unset rather than turned off.
     template.hasResourceProperties("AWS::SES::EmailIdentity", {
       EmailIdentity: "example.cloud",
-      DkimAttributes: { SigningEnabled: true },
+      DkimAttributes: Match.absent(),
     });
     const dkim = Object.values(template.findResources("AWS::Route53::RecordSet")).filter(
       (r) => r.Properties.Type === "CNAME",
@@ -73,7 +74,9 @@ describe("given an email sender in the custom domain", () => {
     const send = policy.Properties.PolicyDocument.Statement.find((s: { Action: string | string[] }) =>
       [s.Action].flat().includes("ses:SendEmail"),
     );
-    expect(JSON.stringify(send.Resource)).toContain("identity/example.cloud");
+    const [identityId] = Object.keys(template.findResources("AWS::SES::EmailIdentity"));
+    expect(JSON.stringify(send.Resource)).toContain(":identity/");
+    expect(JSON.stringify(send.Resource)).toContain(JSON.stringify({ Ref: identityId }));
   });
 
   it("keeps emails that still fail after retries in a queue, with an alarm", () => {

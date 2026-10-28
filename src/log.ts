@@ -1,5 +1,14 @@
-// The one place log lines are written, so secrets are stripped no matter who logs what.
-const SECRET_KEYS = new Set(["password", "passwordhash", "refreshtoken", "accesstoken", "authorization", "cookie", "cookies"]);
+// The one place log lines are written, so secrets and email addresses are stripped no matter who logs what.
+const SECRET_KEYS = new Set([
+  "password",
+  "passwordhash",
+  "refreshtoken",
+  "accesstoken",
+  "authorization",
+  "cookie",
+  "cookies",
+  "email",
+]);
 
 export function redact(value: unknown): unknown {
   if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack };
