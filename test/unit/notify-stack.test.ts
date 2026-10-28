@@ -73,7 +73,7 @@ describe("given an email sender in the custom domain", () => {
     });
   });
 
-  it("lets the notify function send email from the domain and do nothing else with SES", () => {
+  it("lets the notify function send only as the sender address, and do nothing else with SES", () => {
     const [, policy] = Object.entries(template.findResources("AWS::IAM::Policy")).find(([id]) =>
       id.startsWith("NotifyFunctionServiceRoleDefaultPolicy"),
     )!;
@@ -84,9 +84,19 @@ describe("given an email sender in the custom domain", () => {
     const send = policy.Properties.PolicyDocument.Statement.find((s: { Action: string | string[] }) =>
       [s.Action].flat().includes("ses:SendEmail"),
     );
-    const [identityId] = Object.keys(template.findResources("AWS::SES::EmailIdentity"));
-    expect(JSON.stringify(send.Resource)).toContain(":identity/");
-    expect(JSON.stringify(send.Resource)).toContain(JSON.stringify({ Ref: identityId }));
+    expect(send.Condition).toEqual({ StringEquals: { "ses:FromAddress": "noreply@example.cloud" } });
+  });
+
+  // In the sandbox SES also checks the permission against each verified recipient's identity (the
+  // admin's address), so the domain's identity alone is denied. The From condition keeps it narrow.
+  it("lets it send to any verified identity in the account, so the admin's verified address isn't denied", () => {
+    const [, policy] = Object.entries(template.findResources("AWS::IAM::Policy")).find(([id]) =>
+      id.startsWith("NotifyFunctionServiceRoleDefaultPolicy"),
+    )!;
+    const send = policy.Properties.PolicyDocument.Statement.find((s: { Action: string | string[] }) =>
+      [s.Action].flat().includes("ses:SendEmail"),
+    );
+    expect(JSON.stringify(send.Resource)).toContain(":ses:ap-southeast-2:111111111111:identity/*");
   });
 
   it("keeps emails that still fail after retries in a queue, with an alarm", () => {
