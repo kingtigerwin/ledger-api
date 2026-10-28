@@ -12,8 +12,10 @@ export interface Email {
 export interface EmailSettings {
   /** Where sign-ups are sent for approval; without it only customers are emailed. */
   adminEmail?: string;
-  /** The API's public URL, for the admin's approve and reject links. */
+  /** The API's public URL, for the admin's approve and reject calls when there's no admin page. */
   apiUrl: string;
+  /** ledger-ui's admin page, where the admin approves or rejects sign-ups from a browser. */
+  adminPageUrl?: string;
 }
 
 type Item = Record<string, unknown> | undefined;
@@ -24,17 +26,27 @@ type Item = Record<string, unknown> | undefined;
  * hears again when first enabled. Re-enabling a disabled customer sends nothing, and customers
  * without an email are never written to.
  */
-export function emailsFor(before: Item, after: Item, settings: EmailSettings): Email[] {
+export function emailsFor(
+  before: Item,
+  after: Item,
+  settings: EmailSettings,
+): Email[] {
   if (after?.sk !== "PROFILE" || after.role !== "customer") return [];
   const userId = String(after.id);
   const username = String(after.username);
-  const customerEmail = typeof after.email === "string" ? after.email : undefined;
+  const customerEmail =
+    typeof after.email === "string" ? after.email : undefined;
   const emails: Email[] = [];
 
   if (!before && after.status === "pending") {
     // The admin's first, so a customer's address SES won't take can't hold it up.
     if (settings.adminEmail) {
       const user = `${settings.apiUrl}/api/v1/admin/users/${userId}`;
+      const review = settings.adminPageUrl
+        ? `Approve or reject them on the admin page, under Pending:\n\n  ${settings.adminPageUrl}\n\n`
+        : "Signed in as an admin, either:\n\n" +
+          `  Approve:  POST ${user}/enable\n` +
+          `  Reject:   POST ${user}/disable\n\n`;
       emails.push({
         kind: "new_signup",
         userId,
@@ -45,9 +57,7 @@ export function emailsFor(before: Item, after: Item, settings: EmailSettings): E
           `  Username: ${username}\n` +
           `  Email:    ${customerEmail ?? "(none)"}\n` +
           `  User ID:  ${userId}\n\n` +
-          "Signed in as an admin, either:\n\n" +
-          `  Approve:  POST ${user}/enable\n` +
-          `  Reject:   POST ${user}/disable\n\n` +
+          review +
           "Approving emails them that they can sign in. Rejecting sends them nothing.\n",
       });
     }
@@ -64,7 +74,11 @@ export function emailsFor(before: Item, after: Item, settings: EmailSettings): E
       });
     }
   }
-  if (before?.status === "pending" && after.status === "active" && customerEmail) {
+  if (
+    before?.status === "pending" &&
+    after.status === "active" &&
+    customerEmail
+  ) {
     emails.push({
       kind: "approved",
       userId,

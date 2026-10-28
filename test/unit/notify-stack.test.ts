@@ -27,6 +27,7 @@ describe("given an email sender in the custom domain", () => {
         customDomain: customDomain(app),
         emailFrom: "noreply@example.cloud",
         adminEmail: "sisi@example.com",
+        adminPageUrl: "https://ledger.example.cloud/admin",
       }),
     );
   });
@@ -61,6 +62,7 @@ describe("given an email sender in the custom domain", () => {
       EMAIL_FROM: "noreply@example.cloud",
       ADMIN_EMAIL: "sisi@example.com",
       API_URL: "https://api.example.cloud",
+      ADMIN_PAGE_URL: "https://ledger.example.cloud/admin",
     });
     template.hasResourceProperties("AWS::Lambda::EventSourceMapping", {
       FunctionName: Match.anyValue(),
@@ -186,6 +188,7 @@ describe("given an email sender but no admin address", () => {
       id.startsWith("NotifyFunction"),
     )!;
     expect(notify.Properties.Environment.Variables).not.toHaveProperty("ADMIN_EMAIL");
+    expect(notify.Properties.Environment.Variables).not.toHaveProperty("ADMIN_PAGE_URL");
   });
 });
 

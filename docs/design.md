@@ -108,7 +108,7 @@ Emails come from `noreply@haoran.cloud` (`emailFrom` in `cdk.json`):
 | When | To | Email |
 |---|---|---|
 | A customer registers (a new `pending` customer) | the customer | "Your Ledger account is waiting for approval" |
-| A customer registers | the admin (`ADMIN_EMAIL`) | "New Ledger sign-up: <username> is waiting for approval", with their username, email and ID and the `POST /admin/users/{id}/enable` (approve) and `/disable` (reject) URLs |
+| A customer registers | the admin (`ADMIN_EMAIL`) | "New Ledger sign-up: <username> is waiting for approval", with their username, email and ID and a link to ledger-ui's admin page (`adminPageUrl` in `cdk.json`), where the admin approves or rejects them under Pending. Without `adminPageUrl` it gives the `POST /admin/users/{id}/enable` (approve) and `/disable` (reject) URLs instead |
 | The admin enables them for the first time (`pending` → `active`) | the customer | "Your Ledger account is approved", saying they can sign in |
 
 Rejecting is disabling a pending customer; there is no separate reject route, and the customer isn't emailed. Nothing is sent when a disabled customer is enabled again, or to users without an email. Emails are plain text.
