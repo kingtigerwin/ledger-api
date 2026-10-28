@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
+  BatchGetCommand,
+  type BatchGetCommandOutput,
   DeleteCommand,
   GetCommand,
   PutCommand,
@@ -158,6 +160,31 @@ export function createUsersStore(tableName: string) {
       if (!Item) return undefined;
       const { id, username, role, status, createdAt } = Item;
       return { id, username, role, status, createdAt };
+    },
+
+    /** The ID of the user who holds `username`, from its claim alone (no profile or password hash read). */
+    async userIdFor(username: string): Promise<string | undefined> {
+      const { Item } = await ddb.send(new GetCommand({ TableName: tableName, Key: usernameKey(username) }));
+      return Item?.userId as string | undefined;
+    },
+
+    /** Usernames by user ID; IDs with no profile are left out. BatchGet takes at most 100 keys a call. */
+    async usernames(userIds: string[]): Promise<Map<string, string>> {
+      const found = new Map<string, string>();
+      const unique = [...new Set(userIds)];
+      for (let i = 0; i < unique.length; i += 100) {
+        let keys: Record<string, unknown>[] | undefined = unique.slice(i, i + 100).map(profileKey);
+        while (keys?.length) {
+          const res: BatchGetCommandOutput = await ddb.send(
+            new BatchGetCommand({
+              RequestItems: { [tableName]: { Keys: keys, ProjectionExpression: "id, username" } },
+            }),
+          );
+          for (const item of res.Responses?.[tableName] ?? []) found.set(item.id, item.username);
+          keys = res.UnprocessedKeys?.[tableName]?.Keys;
+        }
+      }
+      return found;
     },
 
     async setStatus(userId: string, status: UserStatus): Promise<User> {

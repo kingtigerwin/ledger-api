@@ -127,12 +127,14 @@ export class LedgerStack extends Stack {
     dataTable.grantReadWriteData(dataFunction);
     canReadSigningSecret(dataFunction);
 
-    // MCP tools for agents: the Transactions routes again, acting as the caller. The signing secret is for list cursors.
+    // MCP tools for agents: the Transactions routes again, acting as the caller. The signing secret is for list cursors;
+    // the Users table, read-only, is for the usernames on the admin's cross-customer list.
     const mcpFunction = makeFunction("Mcp", "mcp/lambda.ts", {
       memorySize: 256,
-      environment: { DATA_TABLE: dataTable.tableName },
+      environment: { DATA_TABLE: dataTable.tableName, USERS_TABLE: usersTable.tableName },
     });
     dataTable.grantReadWriteData(mcpFunction);
+    usersTable.grantReadData(mcpFunction);
     canReadSigningSecret(mcpFunction);
 
     const docsFunction = makeFunction("Docs", "docs/lambda.ts", { memorySize: 128 });

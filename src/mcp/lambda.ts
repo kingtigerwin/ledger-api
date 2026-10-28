@@ -6,6 +6,7 @@ import { createMcpHandler } from "./handler";
 const ready = loadSigningSecret().then((secret) =>
   createMcpHandler({
     tableName: process.env.DATA_TABLE!,
+    usersTableName: process.env.USERS_TABLE!,
     cursorSecret: cursorSecretFrom(secret),
     now: () => new Date(),
   }),

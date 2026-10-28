@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AuthContext } from "../../src/auth/authorizer";
+import { createUsersStore } from "../../src/auth/users-store";
 import { createDataHandler } from "../../src/data/handler";
 import { isUlid } from "../../src/data/ulid";
 import { createMcpHandler } from "../../src/mcp/handler";
-import { createDataTable, deleteTable } from "../support/dynamo";
+import { createDataTable, createUsersTable, deleteTable } from "../support/dynamo";
 import { call } from "../support/http";
 
 const customer = (userId: string): AuthContext => ({
@@ -13,17 +15,18 @@ const customer = (userId: string): AuthContext => ({
 });
 
 let tableName: string;
+let usersTableName: string;
 let mcp: ReturnType<typeof createMcpHandler>;
 let data: ReturnType<typeof createDataHandler>;
 
 beforeAll(async () => {
-  tableName = await createDataTable();
-  mcp = createMcpHandler({ tableName, cursorSecret: "test-cursor-secret", now: () => new Date() });
+  [tableName, usersTableName] = await Promise.all([createDataTable(), createUsersTable()]);
+  mcp = createMcpHandler({ tableName, usersTableName, cursorSecret: "test-cursor-secret", now: () => new Date() });
   data = createDataHandler({ tableName, cursorSecret: "test-cursor-secret", now: () => new Date() });
 });
 
 afterAll(async () => {
-  await deleteTable(tableName);
+  await Promise.all([deleteTable(tableName), deleteTable(usersTableName)]);
 });
 
 let nextId = 1;
@@ -278,6 +281,183 @@ describe("POST /api/mcp", () => {
       expect(res.body.result?.isError ?? Boolean(res.body.error)).toBe(true);
       const own = await listOwn("mcp-read-only");
       expect(own.body.items).toEqual([]);
+    });
+  });
+
+  describe("given an admin token", () => {
+    const admin = (userId: string): AuthContext => ({
+      userId,
+      role: "admin",
+      scope: "admin:read admin:write transactions:read transactions:write",
+    });
+    const signUp = (username: string) =>
+      createUsersStore(usersTableName).create({
+        username,
+        passwordHash: "not-a-real-hash",
+        role: "customer",
+        status: "active",
+        now: new Date(),
+      });
+    // Other tests share the table; this month is only used here.
+    const inJan = { from: "2025-01-01", to: "2025-01-31" };
+    const amounts = (page: { items: { amountCents: number }[] }) => page.items.map((t) => t.amountCents);
+
+    it("offers list_all_transactions as a read-only tool with the list filters", async () => {
+      const res = await rpc(admin("mcp-admin-tools"), "tools/list");
+
+      const tool = res.body.result.tools.find((t: { name: string }) => t.name === "list_all_transactions");
+      expect(tool).toBeDefined();
+      expect(tool.annotations.readOnlyHint).toBe(true);
+      expect(Object.keys(tool.inputSchema.properties).sort()).toEqual([
+        "category",
+        "cursor",
+        "from",
+        "limit",
+        "to",
+        "username",
+      ]);
+    });
+
+    it("lists every customer's transactions, newest first, each with its userId and username", async () => {
+      const haoran = await signUp(`haoran-${randomUUID()}`);
+      const sisi = await signUp(`sisi-${randomUUID()}`);
+      await callTool(customer(haoran.id), "create_transaction", { ...cake, date: "2025-01-02", amountCents: 100 });
+      await callTool(customer(sisi.id), "create_transaction", { ...cake, date: "2025-01-03", amountCents: 200 });
+      await callTool(customer(haoran.id), "create_transaction", { ...cake, date: "2025-01-04", amountCents: 300 });
+
+      const all = payload(await callTool(admin("mcp-admin-all"), "list_all_transactions", inJan));
+
+      expect(all.items.map((t: { userId: string; username: string; amountCents: number }) => [t.username, t.amountCents]))
+        .toEqual([[haoran.username, 300], [sisi.username, 200], [haoran.username, 100]]);
+      expect(all.items[0]).toMatchObject({ ...cake, userId: haoran.id, date: "2025-01-04", amountCents: 300 });
+      expect(all.nextCursor).toBeNull();
+    });
+
+    it("pages and filters by category like the REST route", async () => {
+      const kim = await signUp(`kim-${randomUUID()}`);
+      for (const [date, category, amountCents] of [
+        ["2025-02-01", "groceries", 1],
+        ["2025-02-02", "dining", 2],
+        ["2025-02-03", "groceries", 3],
+      ] as const) {
+        await callTool(customer(kim.id), "create_transaction", { ...cake, date, category, amountCents });
+      }
+      const inFeb = { from: "2025-02-01", to: "2025-02-28" };
+      const who = admin("mcp-admin-pages");
+
+      const first = payload(await callTool(who, "list_all_transactions", { ...inFeb, limit: 2 }));
+      const second = payload(await callTool(who, "list_all_transactions", { ...inFeb, limit: 2, cursor: first.nextCursor }));
+      const groceries = payload(await callTool(who, "list_all_transactions", { ...inFeb, category: "groceries" }));
+
+      expect(amounts(first)).toEqual([3, 2]);
+      expect(amounts(second)).toEqual([1]);
+      expect(second.nextCursor).toBeNull();
+      expect(amounts(groceries)).toEqual([3, 1]);
+      expect(second.items[0].username).toBe(kim.username);
+    });
+
+    it("gives a transaction whose user can't be found a null username", async () => {
+      await callTool(customer("mcp-admin-no-profile"), "create_transaction", { ...cake, date: "2025-03-01" });
+
+      const all = payload(
+        await callTool(admin("mcp-admin-missing"), "list_all_transactions", { from: "2025-03-01", to: "2025-03-01" }),
+      );
+
+      expect(all.items).toEqual([expect.objectContaining({ userId: "mcp-admin-no-profile", username: null })]);
+    });
+
+    describe("filtering by username", () => {
+      const inApr = { from: "2025-04-01", to: "2025-04-30" };
+
+      it("lists only that customer's transactions, newest first, paging and filtering as usual", async () => {
+        const haoran = await signUp(`haoran-${randomUUID()}`);
+        const sisi = await signUp(`sisi-${randomUUID()}`);
+        for (const [who, date, category, amountCents] of [
+          [haoran, "2025-04-01", "groceries", 1],
+          [sisi, "2025-04-02", "groceries", 2],
+          [haoran, "2025-04-03", "dining", 3],
+          [haoran, "2025-04-04", "groceries", 4],
+        ] as const) {
+          await callTool(customer(who.id), "create_transaction", { ...cake, date, category, amountCents });
+        }
+        const who = admin("mcp-admin-by-name");
+        const query = { ...inApr, username: haoran.username };
+
+        const first = payload(await callTool(who, "list_all_transactions", { ...query, limit: 2 }));
+        const second = payload(await callTool(who, "list_all_transactions", { ...query, limit: 2, cursor: first.nextCursor }));
+        const groceries = payload(await callTool(who, "list_all_transactions", { ...query, category: "groceries" }));
+
+        expect(amounts(first)).toEqual([4, 3]);
+        expect(amounts(second)).toEqual([1]);
+        expect(second.nextCursor).toBeNull();
+        expect(amounts(groceries)).toEqual([4, 1]);
+        expect(first.items[0]).toMatchObject({ userId: haoran.id, username: haoran.username, date: "2025-04-04" });
+      });
+
+      it("matches the username in any case", async () => {
+        const kim = await signUp(`kim-${randomUUID()}`);
+        await callTool(customer(kim.id), "create_transaction", { ...cake, date: "2025-04-15", amountCents: 15 });
+
+        const page = payload(
+          await callTool(admin("mcp-admin-case"), "list_all_transactions", { ...inApr, username: kim.username.toUpperCase() }),
+        );
+
+        expect(page.items).toEqual([expect.objectContaining({ userId: kim.id, username: kim.username, amountCents: 15 })]);
+      });
+
+      it("reports an unknown username as an error, not as no spending", async () => {
+        const message = failure(
+          await callTool(admin("mcp-admin-nobody"), "list_all_transactions", { username: `nobody-${randomUUID()}` }),
+        );
+
+        expect(message).toMatch(/no such user/i);
+      });
+
+      it("refuses a cursor from the unfiltered list", async () => {
+        const lee = await signUp(`lee-${randomUUID()}`);
+        await callTool(customer(lee.id), "create_transaction", { ...cake, date: "2025-04-20" });
+        await callTool(customer(lee.id), "create_transaction", { ...cake, date: "2025-04-21" });
+        const who = admin("mcp-admin-mixed-cursor");
+        const unfiltered = payload(await callTool(who, "list_all_transactions", { ...inApr, limit: 1 }));
+
+        const message = failure(
+          await callTool(who, "list_all_transactions", { ...inApr, username: lee.username, cursor: unfiltered.nextCursor }),
+        );
+
+        expect(message).toMatch(/cursor/i);
+      });
+    });
+
+    it("refuses a tampered cursor", async () => {
+      const message = failure(
+        await callTool(admin("mcp-admin-cursor"), "list_all_transactions", { cursor: "bad.cursor" }),
+      );
+
+      expect(message).toMatch(/cursor/i);
+    });
+  });
+
+  describe("given a customer token, even one carrying admin:read", () => {
+    const pretender: AuthContext = { userId: "mcp-pretender", role: "customer", scope: "admin:read transactions:read" };
+
+    it("hides list_all_transactions and refuses to call it", async () => {
+      const tools = await rpc(customer("mcp-not-admin"), "tools/list");
+      const pretenderTools = await rpc(pretender, "tools/list");
+      const res = await callTool(customer("mcp-not-admin"), "list_all_transactions", {});
+      const pretenderRes = await callTool(pretender, "list_all_transactions", {});
+
+      for (const list of [tools, pretenderTools]) {
+        expect(list.body.result.tools.map((t: { name: string }) => t.name)).not.toContain("list_all_transactions");
+      }
+      for (const call of [res, pretenderRes]) expect(call.body.result?.isError ?? Boolean(call.body.error)).toBe(true);
+    });
+  });
+
+  describe("given an admin token without admin:read", () => {
+    it("hides list_all_transactions", async () => {
+      const res = await rpc({ userId: "mcp-admin-tx-only", role: "admin", scope: "transactions:read" }, "tools/list");
+
+      expect(res.body.result.tools.map((t: { name: string }) => t.name)).not.toContain("list_all_transactions");
     });
   });
 
