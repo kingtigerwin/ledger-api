@@ -23,7 +23,7 @@ import { NodejsFunction, type NodejsFunctionProps } from "aws-cdk-lib/aws-lambda
 import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
-import { EmailIdentity, Identity } from "aws-cdk-lib/aws-ses";
+import { ConfigurationSet, EmailIdentity, EmailSendingEvent, EventDestination, Identity } from "aws-cdk-lib/aws-ses";
 import { Queue } from "aws-cdk-lib/aws-sqs";
 import { Provider } from "aws-cdk-lib/custom-resources";
 import type { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
@@ -285,8 +285,20 @@ export class LedgerStack extends Stack {
     // Customers' account emails: the Users table's stream drives a Lambda that sends through SES.
     // Sends that still fail after three retries land in a queue, and its alarm says so.
     if (emailFrom && zone) {
+      // Bounces and complaints are published to their own topic, emailed to the alarm address. The
+      // configuration set is the domain's default, so every send is tracked without naming it.
+      const feedbackTopic = new Topic(this, "EmailFeedbackTopic");
+      if (alarmEmail) feedbackTopic.addSubscription(new EmailSubscription(alarmEmail));
+      const configurationSet = new ConfigurationSet(this, "EmailConfigurationSet");
+      configurationSet.addEventDestination("BouncesAndComplaints", {
+        destination: EventDestination.snsTopic(feedbackTopic),
+        events: [EmailSendingEvent.BOUNCE, EmailSendingEvent.COMPLAINT],
+      });
       // Easy DKIM: SES adds its three CNAME records to the zone and verifies the domain itself.
-      const identity = new EmailIdentity(this, "EmailIdentity", { identity: Identity.publicHostedZone(zone) });
+      const identity = new EmailIdentity(this, "EmailIdentity", {
+        identity: Identity.publicHostedZone(zone),
+        configurationSet,
+      });
       const notifyFunction = makeFunction("Notify", "notify/lambda.ts", {
         memorySize: 128,
         environment: {
@@ -295,7 +307,16 @@ export class LedgerStack extends Stack {
           API_URL: `https://${customDomain!.domainName}`,
         },
       });
-      identity.grantSendEmail(notifyFunction);
+      // Sending with a configuration set needs the permission on it as well as on the identity.
+      notifyFunction.addToRolePolicy(
+        new PolicyStatement({
+          actions: ["ses:SendEmail", "ses:SendRawEmail"],
+          resources: [
+            identity.emailIdentityArn,
+            this.formatArn({ service: "ses", resource: "configuration-set", resourceName: configurationSet.configurationSetName }),
+          ],
+        }),
+      );
 
       const failed = new Queue(this, "NotifyFailures", { retentionPeriod: Duration.days(14) });
       notifyFunction.addEventSource(
