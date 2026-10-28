@@ -100,6 +100,69 @@ describe("given an email sender in the custom domain", () => {
     // Five alarms: still within CloudWatch's free 10.
     template.resourceCountIs("AWS::CloudWatch::Alarm", 5);
   });
+
+  it("sends through a configuration set that is the domain's default, so every email is tracked", () => {
+    const [configurationSetId] = Object.keys(template.findResources("AWS::SES::ConfigurationSet"));
+    expect(configurationSetId).toBeDefined();
+    template.hasResourceProperties("AWS::SES::EmailIdentity", {
+      EmailIdentity: "example.cloud",
+      ConfigurationSetAttributes: { ConfigurationSetName: { Ref: configurationSetId } },
+    });
+  });
+
+  it("publishes bounces and complaints, and nothing else, to their own SNS topic", () => {
+    const destinations = Object.values(template.findResources("AWS::SES::ConfigurationSetEventDestination"));
+    expect(destinations).toHaveLength(1);
+    const destination = destinations[0]!.Properties.EventDestination;
+    expect(destination.Enabled).toBe(true);
+    expect([...destination.MatchingEventTypes].sort()).toEqual(["bounce", "complaint"]);
+    const [feedbackTopicId] = Object.keys(template.findResources("AWS::SNS::Topic")).filter((id) =>
+      id.startsWith("EmailFeedback"),
+    );
+    expect(destination.SnsDestination.TopicARN).toEqual({ Ref: feedbackTopicId });
+  });
+
+  it("lets only this account's configuration set publish to the feedback topic", () => {
+    template.hasResourceProperties("AWS::SNS::TopicPolicy", {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: "sns:Publish",
+            Principal: { Service: "ses.amazonaws.com" },
+            Condition: { StringEquals: Match.objectLike({ "AWS:SourceAccount": "111111111111" }) },
+          }),
+        ]),
+      },
+    });
+  });
+
+  it("lets the notify function send with the configuration set", () => {
+    const [, policy] = Object.entries(template.findResources("AWS::IAM::Policy")).find(([id]) =>
+      id.startsWith("NotifyFunctionServiceRoleDefaultPolicy"),
+    )!;
+    const sends = policy.Properties.PolicyDocument.Statement.filter((s: { Action: string | string[] }) =>
+      [s.Action].flat().includes("ses:SendEmail"),
+    );
+    expect(JSON.stringify(sends)).toContain(":configuration-set/");
+  });
+});
+
+describe("given an email sender and an alarm email", () => {
+  it("emails bounces and complaints to the alarm address too", () => {
+    const app = new App({ context: { alarmEmail: "ops@example.com" } });
+    const template = Template.fromStack(
+      new LedgerStack(app, "LedgerApi", { env, customDomain: customDomain(app), emailFrom: "noreply@example.cloud" }),
+    );
+
+    const [feedbackTopicId] = Object.keys(template.findResources("AWS::SNS::Topic")).filter((id) =>
+      id.startsWith("EmailFeedback"),
+    );
+    template.hasResourceProperties("AWS::SNS::Subscription", {
+      Protocol: "email",
+      Endpoint: "ops@example.com",
+      TopicArn: { Ref: feedbackTopicId },
+    });
+  });
 });
 
 describe("given an email sender but no admin address", () => {
@@ -117,10 +180,13 @@ describe("given an email sender but no admin address", () => {
 });
 
 describe("given no email sender", () => {
-  it("sends no email: no SES identity, notify function, stream or queue", () => {
+  it("sends no email: no SES identity, configuration set, feedback topic, notify function, stream or queue", () => {
     const template = synth({});
 
     template.resourceCountIs("AWS::SES::EmailIdentity", 0);
+    template.resourceCountIs("AWS::SES::ConfigurationSet", 0);
+    // Only the alarm topic.
+    template.resourceCountIs("AWS::SNS::Topic", 1);
     template.resourceCountIs("AWS::Lambda::EventSourceMapping", 0);
     template.resourceCountIs("AWS::SQS::Queue", 0);
     const [users] = Object.values(template.findResources("AWS::DynamoDB::GlobalTable")).filter(
