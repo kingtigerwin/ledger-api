@@ -8,6 +8,8 @@ import { createUserWithStatus } from "../support/users";
 
 const REGISTER = "POST /api/v1/auth/register";
 const LOGIN = "POST /api/v1/auth/login";
+// Valid apart from its length: 255 characters, one more than an address can have.
+const TOO_LONG_EMAIL = `${"c".repeat(60)}@${`${"d".repeat(60)}.`.repeat(3)}example.com`;
 
 let tableName: string;
 let handler: ReturnType<typeof createAuthHandler>;
@@ -22,14 +24,15 @@ afterAll(async () => {
 });
 
 describe("POST /auth/register", () => {
-  describe("given a new username and a password", () => {
-    it("creates a pending customer and never returns the password", async () => {
-      const res = await call(handler, REGISTER, { username: "alice", password: "pw" });
+  describe("given a new username, a password and an email address", () => {
+    it("creates a pending customer with that email and never returns the password", async () => {
+      const res = await call(handler, REGISTER, { username: "alice", password: "pw", email: "alice@example.com" });
 
       expect(res.status).toBe(201);
       expect(res.body).toEqual({
         id: expect.any(String),
         username: "alice",
+        email: "alice@example.com",
         role: "customer",
         status: "pending",
         createdAt: expect.any(String),
@@ -39,9 +42,9 @@ describe("POST /auth/register", () => {
 
   describe("given a username that exists in different letter case", () => {
     it("rejects it as taken", async () => {
-      await call(handler, REGISTER, { username: "bob", password: "pw" });
+      await call(handler, REGISTER, { username: "bob", password: "pw", email: "bob@example.com" });
 
-      const res = await call(handler, REGISTER, { username: "Bob", password: "other" });
+      const res = await call(handler, REGISTER, { username: "Bob", password: "other", email: "bob@example.com" });
 
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe("username_taken");
@@ -50,10 +53,13 @@ describe("POST /auth/register", () => {
 
   describe("given a field that is empty or too long", () => {
     it.each([
-      ["an empty username", { username: "", password: "pw" }],
-      ["an empty password", { username: "carol", password: "" }],
-      ["a 65-character username", { username: "c".repeat(65), password: "pw" }],
-      ["a 1,025-character password", { username: "carol", password: "p".repeat(1025) }],
+      ["an empty username", { username: "", password: "pw", email: "carol@example.com" }],
+      ["an empty password", { username: "carol", password: "", email: "carol@example.com" }],
+      ["a 65-character username", { username: "c".repeat(65), password: "pw", email: "carol@example.com" }],
+      ["a 1,025-character password", { username: "carol", password: "p".repeat(1025), email: "carol@example.com" }],
+      ["no email", { username: "carol", password: "pw" }],
+      ["an email that isn't an address", { username: "carol", password: "pw", email: "carol-at-example" }],
+      ["a 255-character email", { username: "carol", password: "pw", email: TOO_LONG_EMAIL }],
     ])("rejects %s", async (_, body) => {
       const res = await call(handler, REGISTER, body);
 
@@ -63,10 +69,30 @@ describe("POST /auth/register", () => {
   });
 });
 
+describe("GET /auth/me", () => {
+  describe("given a customer who registered with an email", () => {
+    it("includes the email", async () => {
+      const registered = await call(handler, REGISTER, { username: "mia", password: "pw", email: "mia@example.com" });
+
+      const res = await call(handler, "GET /api/v1/auth/me", undefined, {
+        auth: { userId: registered.body.id, role: "customer", scope: "transactions:read transactions:write" },
+      });
+
+      expect(res.body).toEqual({
+        id: registered.body.id,
+        username: "mia",
+        email: "mia@example.com",
+        role: "customer",
+        status: "pending",
+      });
+    });
+  });
+});
+
 describe("POST /auth/login", () => {
   describe("given a pending user with the correct password", () => {
     it("refuses with account_pending", async () => {
-      await call(handler, REGISTER, { username: "dave", password: "pw" });
+      await call(handler, REGISTER, { username: "dave", password: "pw", email: "dave@example.com" });
 
       const res = await call(handler, LOGIN, { username: "dave", password: "pw" });
 
@@ -80,7 +106,7 @@ describe("POST /auth/login", () => {
       ["an unknown username", { username: "nobody", password: "pw" }],
       ["a pending user's wrong password", { username: "erin", password: "wrong" }],
     ])("refuses %s with the same invalid_credentials error", async (_, body) => {
-      await call(handler, REGISTER, { username: "erin", password: "pw" });
+      await call(handler, REGISTER, { username: "erin", password: "pw", email: "erin@example.com" });
 
       const res = await call(handler, LOGIN, body);
 

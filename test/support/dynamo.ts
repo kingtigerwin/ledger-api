@@ -19,6 +19,7 @@ export async function createUsersTable(): Promise<string> {
         { AttributeName: usersTableKeys.partitionKey, KeyType: "HASH" },
         { AttributeName: usersTableKeys.sortKey, KeyType: "RANGE" },
       ],
+      StreamSpecification: { StreamEnabled: true, StreamViewType: usersTableKeys.streamViewType },
     }),
   );
   return name;

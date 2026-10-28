@@ -20,6 +20,12 @@ describe("given something about to be logged", () => {
     });
   });
 
+  it("hides email addresses, which are personal data", () => {
+    const logged = redact({ user: { username: "alice", email: "alice@example.com" }, to: { Email: "a@b.c" } });
+
+    expect(logged).toEqual({ user: { username: "alice", email: "[REDACTED]" }, to: { Email: "[REDACTED]" } });
+  });
+
   it("keeps an Error's name and message", () => {
     const logged = redact({ err: new TypeError("boom") }) as { err: { name: string; message: string } };
 
