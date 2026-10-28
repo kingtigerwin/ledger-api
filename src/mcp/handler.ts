@@ -4,6 +4,7 @@ import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { z } from "zod";
 import { createUsersStore } from "../auth/users-store";
+import { credentialsSchema } from "../auth/schemas";
 import { ApiError, authContext, withErrors } from "../http";
 import { log } from "../log";
 import { createLedger, type LedgerDeps } from "../data/ledger";
@@ -21,6 +22,10 @@ export type McpDeps = LedgerDeps & {
 };
 
 const byId = z.object({ id: z.string().describe("The transaction's id") });
+
+const listAllQuerySchema = listQuerySchema.extend({
+  username: credentialsSchema.shape.username.optional().describe("Only this customer's transactions"),
+});
 
 const READ: ToolAnnotations = { readOnlyHint: true, openWorldHint: false };
 const WRITE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
@@ -157,13 +162,20 @@ export function createMcpHandler(deps: McpDeps) {
         description:
           "Admin only. Every customer's transactions, newest first, as { items, nextCursor }; each item has the " +
           "customer's userId and username (null if the user can't be found). Same filters as list_transactions: " +
-          "from and to (YYYY-MM-DD, inclusive), category, limit 1-100 (default 50). To find one customer's " +
-          "spending, filter by date and keep the items with their username. For the next page, call again with " +
-          "the same filters and cursor set to nextCursor; it is null on the last page.",
-        inputSchema: listQuerySchema,
+          "from and to (YYYY-MM-DD, inclusive), category, limit 1-100 (default 50); username limits it to one " +
+          "customer (\"show haoran's spending\"), and fails if there is no such user. For the next page, call again " +
+          "with the same filters and cursor set to nextCursor; it is null on the last page.",
+        inputSchema: listAllQuerySchema,
         annotations: READ,
       },
-      async (query) => {
+      async ({ username, ...query }) => {
+        if (username) {
+          // One customer's own partition, not a filter over everyone's.
+          const customerId = await users.userIdFor(username);
+          if (!customerId) throw new ApiError(404, "user_not_found", "No such user");
+          const page = await ledger.list(customerId, query);
+          return { ...page, items: page.items.map((t) => ({ ...t, userId: customerId, username })) };
+        }
         const page = await ledger.listAll(query);
         const usernames = await users.usernames(page.items.map((t) => t.userId));
         return {

@@ -162,6 +162,12 @@ export function createUsersStore(tableName: string) {
       return { id, username, role, status, createdAt };
     },
 
+    /** The ID of the user who holds `username`, from its claim alone (no profile or password hash read). */
+    async userIdFor(username: string): Promise<string | undefined> {
+      const { Item } = await ddb.send(new GetCommand({ TableName: tableName, Key: usernameKey(username) }));
+      return Item?.userId as string | undefined;
+    },
+
     /** Usernames by user ID; IDs with no profile are left out. BatchGet takes at most 100 keys a call. */
     async usernames(userIds: string[]): Promise<Map<string, string>> {
       const found = new Map<string, string>();
