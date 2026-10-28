@@ -308,7 +308,14 @@ describe("POST /api/mcp", () => {
       const tool = res.body.result.tools.find((t: { name: string }) => t.name === "list_all_transactions");
       expect(tool).toBeDefined();
       expect(tool.annotations.readOnlyHint).toBe(true);
-      expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(["category", "cursor", "from", "limit", "to"]);
+      expect(Object.keys(tool.inputSchema.properties).sort()).toEqual([
+        "category",
+        "cursor",
+        "from",
+        "limit",
+        "to",
+        "username",
+      ]);
     });
 
     it("lists every customer's transactions, newest first, each with its userId and username", async () => {
@@ -357,6 +364,68 @@ describe("POST /api/mcp", () => {
       );
 
       expect(all.items).toEqual([expect.objectContaining({ userId: "mcp-admin-no-profile", username: null })]);
+    });
+
+    describe("filtering by username", () => {
+      const inApr = { from: "2025-04-01", to: "2025-04-30" };
+
+      it("lists only that customer's transactions, newest first, paging and filtering as usual", async () => {
+        const haoran = await signUp(`haoran-${randomUUID()}`);
+        const sisi = await signUp(`sisi-${randomUUID()}`);
+        for (const [who, date, category, amountCents] of [
+          [haoran, "2025-04-01", "groceries", 1],
+          [sisi, "2025-04-02", "groceries", 2],
+          [haoran, "2025-04-03", "dining", 3],
+          [haoran, "2025-04-04", "groceries", 4],
+        ] as const) {
+          await callTool(customer(who.id), "create_transaction", { ...cake, date, category, amountCents });
+        }
+        const who = admin("mcp-admin-by-name");
+        const query = { ...inApr, username: haoran.username };
+
+        const first = payload(await callTool(who, "list_all_transactions", { ...query, limit: 2 }));
+        const second = payload(await callTool(who, "list_all_transactions", { ...query, limit: 2, cursor: first.nextCursor }));
+        const groceries = payload(await callTool(who, "list_all_transactions", { ...query, category: "groceries" }));
+
+        expect(amounts(first)).toEqual([4, 3]);
+        expect(amounts(second)).toEqual([1]);
+        expect(second.nextCursor).toBeNull();
+        expect(amounts(groceries)).toEqual([4, 1]);
+        expect(first.items[0]).toMatchObject({ userId: haoran.id, username: haoran.username, date: "2025-04-04" });
+      });
+
+      it("matches the username in any case", async () => {
+        const kim = await signUp(`kim-${randomUUID()}`);
+        await callTool(customer(kim.id), "create_transaction", { ...cake, date: "2025-04-15", amountCents: 15 });
+
+        const page = payload(
+          await callTool(admin("mcp-admin-case"), "list_all_transactions", { ...inApr, username: kim.username.toUpperCase() }),
+        );
+
+        expect(page.items).toEqual([expect.objectContaining({ userId: kim.id, username: kim.username, amountCents: 15 })]);
+      });
+
+      it("reports an unknown username as an error, not as no spending", async () => {
+        const message = failure(
+          await callTool(admin("mcp-admin-nobody"), "list_all_transactions", { username: `nobody-${randomUUID()}` }),
+        );
+
+        expect(message).toMatch(/no such user/i);
+      });
+
+      it("refuses a cursor from the unfiltered list", async () => {
+        const lee = await signUp(`lee-${randomUUID()}`);
+        await callTool(customer(lee.id), "create_transaction", { ...cake, date: "2025-04-20" });
+        await callTool(customer(lee.id), "create_transaction", { ...cake, date: "2025-04-21" });
+        const who = admin("mcp-admin-mixed-cursor");
+        const unfiltered = payload(await callTool(who, "list_all_transactions", { ...inApr, limit: 1 }));
+
+        const message = failure(
+          await callTool(who, "list_all_transactions", { ...inApr, username: lee.username, cursor: unfiltered.nextCursor }),
+        );
+
+        expect(message).toMatch(/cursor/i);
+      });
     });
 
     it("refuses a tampered cursor", async () => {
