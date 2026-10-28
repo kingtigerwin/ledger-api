@@ -103,14 +103,17 @@ The rules live in `src/data/ledger.ts`, which both `src/data/handler.ts` (REST) 
 
 ## Account emails
 
-A customer gets two emails, from `noreply@haoran.cloud` (`emailFrom` in `cdk.json`):
+Emails come from `noreply@haoran.cloud` (`emailFrom` in `cdk.json`):
 
-| When | Email |
-|---|---|
-| They register (a new `pending` customer) | "Your Ledger account is waiting for approval" |
-| The admin enables them for the first time (`pending` → `active`) | "Your Ledger account is approved", saying they can sign in |
+| When | To | Email |
+|---|---|---|
+| A customer registers (a new `pending` customer) | the customer | "Your Ledger account is waiting for approval" |
+| A customer registers | the admin (`ADMIN_EMAIL`) | "New Ledger sign-up: <username> is waiting for approval", with their username, email and ID and the `POST /admin/users/{id}/enable` (approve) and `/disable` (reject) URLs |
+| The admin enables them for the first time (`pending` → `active`) | the customer | "Your Ledger account is approved", saying they can sign in |
 
-Nothing is sent when a disabled customer is enabled again, when a pending customer is disabled, for the admin, or for users without an email. Emails are plain text.
+Rejecting is disabling a pending customer; there is no separate reject route, and the customer isn't emailed. Nothing is sent when a disabled customer is enabled again, or to users without an email. Emails are plain text.
+
+The admin's address is personal, so it isn't in `cdk.json`: the GitHub variable `ADMIN_EMAIL` reaches the stack as the `adminEmail` context value, and the Notify Lambda as `ADMIN_EMAIL`. Without it, only customers are emailed. The bootstrap admin has no email of their own on the Users table.
 
 ```text
 register / enable  →  Users table PROFILE item  →  DynamoDB Stream  →  Notify Lambda  →  SES
@@ -118,12 +121,12 @@ register / enable  →  Users table PROFILE item  →  DynamoDB Stream  →  Not
 ```
 
 - The handlers don't send anything: the Users table's stream (new and old images) drives `src/notify/`. Registration never fails because of email, and every way a user changes is covered. A Lambda event filter passes only `PROFILE` items, so refresh tokens, username claims and lockouts don't invoke it. `src/notify/emails.ts` decides which email a change calls for.
-- Records are handled in order. On the first failed send the Lambda reports that record (`ReportBatchItemFailures`), so the stream retries from there; after 3 retries the batch goes to an SQS queue (kept 14 days) and an alarm fires. Delivery is at least once: a timeout mid-batch can repeat an email.
+- Records are handled in order. On the first failed send the Lambda reports that record (`ReportBatchItemFailures`), so the stream retries from there; after 3 retries the batch goes to an SQS queue (kept 14 days) and an alarm fires. Delivery is at least once: a timeout mid-batch can repeat an email, and a retried sign-up sends both of its emails again.
 - SES verifies `haoran.cloud` with Easy DKIM: CDK adds the three `CNAME` records to the existing zone. The Notify Lambda may only `ses:SendEmail`/`SendRawEmail` from that identity. `emailFrom` must be in the custom domain's zone, and without it no stream, Lambda, identity or queue is created.
-- New SES accounts are in the sandbox (200 emails a day, only to verified addresses) until production access is requested in the SES console, once, by hand.
+- New SES accounts are in the sandbox (200 emails a day, only to verified addresses) until production access is requested in the SES console, once, by hand. Until then, verify the admin's address in SES too.
 - Email addresses are personal data: `src/log.ts` redacts `email` fields, and the Lambda logs only the user's ID and the email kind, scrubbing the address out of SES error messages.
-- Cost: the stream, Lambda, queue and alarm are free. SES gives 3,000 emails a month free for the first 12 months, then $0.10 per 1,000 (two per customer). This is the project's only cost above $0.
-- The register route is public, so someone could sign up with another person's address and send them the "waiting for approval" email. Throttling on `/auth/*` limits how often; verifying the address first would be the fix if it's abused.
+- Cost: the stream, Lambda, queue and alarm are free. SES gives 3,000 emails a month free for the first 12 months, then $0.10 per 1,000 (three per customer). This is the project's only cost above $0.
+- The register route is public, so someone could sign up with another person's address and send them the "waiting for approval" email, and every sign-up also emails the admin. Throttling on `/auth/*` limits how often; verifying the address first would be the fix if it's abused.
 
 ## Conventions
 

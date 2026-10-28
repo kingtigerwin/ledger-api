@@ -25,7 +25,7 @@ CDK stacks (`bin/app.ts`): `LedgerApi` (`lib/ledger-stack.ts`, the app), `Ledger
 - `src/auth/`: register, login, refresh, logout, me (Users table); `authorizer-lambda.ts` validates the bearer JWT for every protected route and passes `userId`, `role`, `scope` in the request context.
 - `src/admin/`: list, enable, disable users. `src/data/`: transactions, plus the admin's `/admin/...` routes to view, edit and delete any customer's transactions.
 - `src/mcp/`: `POST /api/mcp`, MCP over stateless Streamable HTTP for agents. Behind the same authorizer; a fresh `McpServer` per request holds the caller's tools, one per Transactions route, plus the admin's read-only `list_all_transactions` (with usernames from the Users table). `src/data/ledger.ts` holds the transaction rules and errors that both the REST handler and the MCP tools call, so add behaviour there, not in either front door.
-- `src/notify/`: emails customers on sign-up and first approval. The Users table's stream (only with `emailFrom` in `cdk.json`) drives it; `emails.ts` decides which email a change calls for, and it sends through SES.
+- `src/notify/`: emails customers on sign-up and first approval, and the admin (`ADMIN_EMAIL`) on each sign-up to approve or reject. The Users table's stream (only with `emailFrom` in `cdk.json`) drives it; `emails.ts` decides which email a change calls for, and it sends through SES.
 - `src/bootstrap/`: custom resource that creates the SSM secrets and the `sisi` admin on deploy, never overwriting. `src/docs/`: serves `/api/openapi.json`.
 - `src/http.ts` holds the shared handler plumbing (`withErrors`, `ApiError` → `{ error: { code, message } }`, `parseBody`, `requireAdmin`).
 
