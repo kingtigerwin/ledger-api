@@ -32,18 +32,7 @@ export function emailsFor(before: Item, after: Item, settings: EmailSettings): E
   const emails: Email[] = [];
 
   if (!before && after.status === "pending") {
-    if (customerEmail) {
-      emails.push({
-        kind: "pending",
-        userId,
-        to: customerEmail,
-        subject: "Your Ledger account is waiting for approval",
-        text:
-          `Hi ${username},\n\n` +
-          "Thanks for signing up to Ledger. Your account has been created and is waiting for an admin to approve it.\n\n" +
-          "We'll email you again as soon as you can sign in.\n",
-      });
-    }
+    // The admin's first, so a customer's address SES won't take can't hold it up.
     if (settings.adminEmail) {
       const user = `${settings.apiUrl}/api/v1/admin/users/${userId}`;
       emails.push({
@@ -60,6 +49,18 @@ export function emailsFor(before: Item, after: Item, settings: EmailSettings): E
           `  Approve:  POST ${user}/enable\n` +
           `  Reject:   POST ${user}/disable\n\n` +
           "Approving emails them that they can sign in. Rejecting sends them nothing.\n",
+      });
+    }
+    if (customerEmail) {
+      emails.push({
+        kind: "pending",
+        userId,
+        to: customerEmail,
+        subject: "Your Ledger account is waiting for approval",
+        text:
+          `Hi ${username},\n\n` +
+          "Thanks for signing up to Ledger. Your account has been created and is waiting for an admin to approve it.\n\n" +
+          "We'll email you again as soon as you can sign in.\n",
       });
     }
   }

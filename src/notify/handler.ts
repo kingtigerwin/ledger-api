@@ -18,14 +18,18 @@ export interface NotifyDeps extends EmailSettings {
   log?: Logger;
 }
 
+// SES refuses these for good (an unverified recipient in the sandbox, a malformed address), so a retry can't help.
+const PERMANENT_ERRORS = new Set(["MessageRejected", "BadRequestException"]);
+
 const image = (attributes: unknown) =>
   attributes ? unmarshall(attributes as Record<string, AttributeValue>) : undefined;
 
 /**
- * Reads the Users table's stream and sends the account emails. Records are handled in order; on
- * the first failed send it reports that record, so the stream retries from there (and the records
- * after it come again with it), until the retries run out and the batch goes to the failure queue.
- * A retried sign-up sends both of its emails again, so one can arrive twice.
+ * Reads the Users table's stream and sends the account emails. Records are handled in order. An
+ * email SES refuses outright is logged and skipped. On any other failed send it reports that record,
+ * so the stream retries from there (and the records after it come again with it), until the retries
+ * run out and the batch goes to the failure queue. A retried sign-up sends both of its emails again,
+ * so one can arrive twice.
  */
 export function createNotifyHandler(deps: NotifyDeps) {
   const log = deps.log ?? defaultLog;
@@ -41,6 +45,10 @@ export function createNotifyHandler(deps: NotifyDeps) {
           // SES names the recipient in some errors; keep the address out of the logs.
           const error =
             err instanceof Error ? { name: err.name, message: err.message.replaceAll(email.to, "[email]") } : {};
+          if (err instanceof Error && PERMANENT_ERRORS.has(err.name)) {
+            log({ event: "email_rejected", kind: email.kind, userId: email.userId, error }, "error");
+            continue;
+          }
           log({ event: "notify_failed", kind: email.kind, userId: email.userId, error }, "error");
           return { batchItemFailures: [{ itemIdentifier: record.dynamodb?.SequenceNumber ?? "" }] };
         }
