@@ -15,6 +15,7 @@ type Logger = Callable[[LogEntry, Level], None]
 
 
 def redact(value: Any) -> Any:
+    """A copy of value with every secret key's value replaced, at any depth, whatever the key's case."""
     if isinstance(value, BaseException):
         return {"name": type(value).__name__, "message": str(value)}
     if isinstance(value, list | tuple):

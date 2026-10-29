@@ -43,11 +43,25 @@ Two tables, both keyed `pk`/`sk`: Users (users, username claims, refresh-token h
 
 `docs/design.md` is the agreed design: endpoints, auth flow, data model, table layout and conventions. Read it before adding features, and update it when a design decision changes.
 
-- The Lambdas are moving from TypeScript to Python (`src/ledger_api/`, tests in `tests/`), one at a time, to match the newer projects such as ledger-agent. Write new Lambdas in Python. A ported Lambda keeps its logical IDs in the stack (so CloudFormation updates it in place) and its JSON log lines. The CDK stays TypeScript for now. A Python Lambda's code is the `ledger_api` package as it stands (`Code.fromAsset` on `src/`), so it may only import what the Lambda runtime provides (boto3); anything more needs a bundling step first.
-- Work test-first: write the failing test, make it pass, then refactor. Name tests in BDD style: `describe("given …")` / `it("…")`, and in Python nested `class TestGiven…` / `def test_…`.
+- Work test-first: write the failing test, make it pass, then refactor. Name tests in BDD style: `describe("given …")` / `it("…")` (Python: see below).
 - Behaviour that touches DynamoDB is tested as integration tests in `test/integration/` (`tests/integration/` in Python) against DynamoDB Local, not with a stubbed client. Pure logic goes in `test/unit/`.
 - Use `src/db-client.ts` for DynamoDB access; it picks up `DYNAMODB_ENDPOINT` for local runs.
 - The project must stay at $0/month: prefer free AWS features (SSM Parameter Store over Secrets Manager, no WAF/KMS) and call out anything that would cost money.
 - Secrets (JWT signing secret, root admin password) live only in SSM. Never put credentials in source, tests or CDK context.
 - Every API route must also be listed in `src/openapi.ts`; `test/unit/openapi.test.ts` fails if the spec and the stack's routes differ. Request schemas live in their own modules (`src/auth/schemas.ts`, `src/data/*-schema.ts`, `src/admin/schemas.ts`) so the spec can import them without pulling in handlers.
 - Log through `src/log.ts`, which redacts passwords, tokens, cookies and Authorization headers. The failed-login alarm counts `{ event: "login_failed" }` lines from the auth Lambda.
+
+## Python
+
+The Lambdas are moving from TypeScript to Python (`src/ledger_api/`, tests in `tests/`) one at a time, to match ledger-agent. Write every new Lambda in Python; the CDK stays TypeScript for now. A ported Lambda keeps its logical IDs in the stack, so CloudFormation updates it in place, and keeps its JSON log lines.
+
+- Style is PEP 8, enforced by ruff with the rules in `pyproject.toml`; types are checked by pyright in strict mode. Python work is done when `ruff check`, `ruff format --check`, `pyright` and `pytest` all pass. Fix the code rather than silencing a rule; the one accepted ignore is `reportUnknownMemberType` on `boto3.client(...)`, since only some services' stubs are installed.
+- Naming follows PEP 8: `snake_case` modules, functions and variables, `PascalCase` classes, `UPPER_SNAKE` constants, a leading `_` for module-private names. Data that crosses the wire keeps the API's camelCase keys (`userId`, `batchItemFailures`, log fields), so convert at the boundary.
+- Each Lambda keeps the TypeScript split: `handler.py` has `create_<area>_handler(*, deps)`, which tests drive with fakes, and `lambda_function.py` builds the real clients once per cold start and exposes `handler(event, context)`.
+- Typing uses Python 3.13 syntax (`X | None`, `list[str]`, `type` aliases). Values are `@dataclass(frozen=True)`; collaborators are `Callable` aliases or `Protocol`s. `Any` stays at the edge, for raw AWS events (`dict[str, Any]`).
+- Runtime code imports only the standard library and boto3/botocore: a Lambda's code is the `ledger_api` package as it stands (`Code.fromAsset` on `src/`), and the Lambda runtime provides boto3. A third-party runtime dependency needs a bundling step first, like ledger-agent's `infra/package.py`. `mypy_boto3_*` stubs are dev-only, so import them under `TYPE_CHECKING`. Add packages with `uv add` (`--dev` for tools) so `uv.lock` stays in step.
+- AWS errors arrive as `botocore.exceptions.ClientError`; branch on `err.response["Error"]["Code"]`.
+- Log through `ledger_api.log.log`: the same redacted JSON lines as `src/log.ts`.
+- Docstrings (PEP 257) on public functions and classes state the contract and the why, not the signature.
+- Tests are pytest, named BDD-style as nested `class TestGiven…` / `def test_…`. Shared fixtures go in `conftest.py`; tables of cases use `pytest.mark.parametrize` with readable `id`s.
+- Load the `aws-sdk-python-usage` skill before writing boto3 code.
