@@ -24,6 +24,13 @@ jobs:
       - run: npm run lint
       - run: npm run test:unit
       - run: npm run test:integration
+      # The Lambdas moved to Python so far.
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run pyright
+      - run: uv run pytest
 
   # Deploys main after the tests pass. Needs, in the repo's settings:
   #   secret   AWS_DEPLOY_ROLE_ARN  (output of the LedgerApiCiAccess stack; a secret so the

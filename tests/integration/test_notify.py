@@ -10,12 +10,12 @@ from ledger_api.notify.handler import OutgoingEmail, create_notify_handler
 
 def stream_records(dynamodb: DynamoDBClient, streams: DynamoDBStreamsClient, table: str) -> list[dict[str, Any]]:
     """Every record on the table's stream so far, oldest first, in the shape Lambda receives them."""
-    stream_arn = dynamodb.describe_table(TableName=table)["Table"]["LatestStreamArn"]
+    stream_arn = dynamodb.describe_table(TableName=table)["Table"].get("LatestStreamArn", "")
     shards = streams.describe_stream(StreamArn=stream_arn)["StreamDescription"].get("Shards", [])
     records: list[dict[str, Any]] = []
     for shard in shards:
         iterator: str | None = streams.get_shard_iterator(
-            StreamArn=stream_arn, ShardId=shard["ShardId"], ShardIteratorType="TRIM_HORIZON"
+            StreamArn=stream_arn, ShardId=shard.get("ShardId", ""), ShardIteratorType="TRIM_HORIZON"
         )["ShardIterator"]
         while iterator:
             page = streams.get_records(ShardIterator=iterator)
@@ -42,7 +42,8 @@ class TestEmailsFromTheUsersTablesStream:
         ) -> None:
             # The writes the auth and admin handlers make, in the store's item shapes.
             dynamodb.put_item(
-                TableName=users_table, Item={"pk": {"S": "USERNAME#haoran"}, "sk": {"S": "USERNAME"}, "userId": {"S": "u-1"}}
+                TableName=users_table,
+                Item={"pk": {"S": "USERNAME#haoran"}, "sk": {"S": "USERNAME"}, "userId": {"S": "u-1"}},
             )
             dynamodb.put_item(
                 TableName=users_table,

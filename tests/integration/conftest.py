@@ -19,12 +19,12 @@ _LOCAL: dict[str, Any] = {
 
 @pytest.fixture
 def dynamodb() -> DynamoDBClient:
-    return boto3.client("dynamodb", **_LOCAL)
+    return boto3.client("dynamodb", **_LOCAL)  # pyright: ignore[reportUnknownMemberType]
 
 
 @pytest.fixture
 def streams() -> DynamoDBStreamsClient:
-    return boto3.client("dynamodbstreams", **_LOCAL)
+    return boto3.client("dynamodbstreams", **_LOCAL)  # pyright: ignore[reportUnknownMemberType]
 
 
 @pytest.fixture

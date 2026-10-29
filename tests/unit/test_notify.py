@@ -4,7 +4,7 @@ import pytest
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
-from ledger_api.log import LogEntry, Level
+from ledger_api.log import Level, LogEntry
 from ledger_api.notify.emails import EmailSettings, emails_for
 from ledger_api.notify.handler import OutgoingEmail, create_notify_handler
 
@@ -130,7 +130,7 @@ def ses_error(code: str, to: str) -> ClientError:
 
 
 class Notifier:
-    """A notifier whose sender records what it was asked to send, failing for the given addresses with the given SES error."""
+    """A notifier whose sender records what it sends, failing for the given addresses with the given SES error."""
 
     def __init__(self, fail_for: dict[str, str] | None = None) -> None:
         self.sent: list[OutgoingEmail] = []
@@ -197,7 +197,9 @@ class TestTheNotifyLambda:
 
     @pytest.mark.parametrize("error_code", ["MessageRejected", "BadRequestException"])
     class TestGivenASendSesRefusesOutrightSuchAsToAnUnverifiedAddressInTheSandbox:
-        def test_skips_that_email_without_a_retry_and_sends_the_rest_including_the_admins(self, error_code: str) -> None:
+        def test_skips_that_email_without_a_retry_and_sends_the_rest_including_the_admins(
+            self, error_code: str
+        ) -> None:
             notifier = Notifier({"bad@example.com": error_code})
 
             res = notifier.handler(
