@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
@@ -83,3 +83,18 @@ class UsersStore:
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:
             raise UserNotFoundError(user_id) from None
         return _user(res["Attributes"])
+
+    def revoke_refresh_tokens(self, user_id: str) -> None:
+        """Deletes every refresh token the user has, logging them out everywhere within one access-token lifetime."""
+        query: dict[str, Any] = {
+            "KeyConditionExpression": Key("pk").eq(f"USER#{user_id}") & Key("sk").begins_with("REFRESH#"),
+            "ProjectionExpression": "pk, sk",
+        }
+        with self._table.batch_writer() as batch:
+            while True:
+                page = self._table.query(**query)
+                for key in page.get("Items", []):
+                    batch.delete_item(Key=key)
+                if "LastEvaluatedKey" not in page:
+                    break
+                query["ExclusiveStartKey"] = page["LastEvaluatedKey"]

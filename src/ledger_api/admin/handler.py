@@ -45,6 +45,12 @@ def create_admin_handler(*, users: UsersStore) -> Handler:
             case "POST /api/v1/admin/users/{id}/enable":
                 require_admin(event, "admin:write")
                 return json_response(200, _set_status(event, "active").as_json())
+            case "POST /api/v1/admin/users/{id}/disable":
+                require_admin(event, "admin:write")
+                user = _set_status(event, "disabled")
+                # Their access token still works until it expires (at most 15 minutes); refreshing ends now.
+                users.revoke_refresh_tokens(user.id)
+                return json_response(200, user.as_json())
             case _:
                 pass
         raise ApiError(404, "route_not_found", f"No route for {event.get('routeKey')}")
