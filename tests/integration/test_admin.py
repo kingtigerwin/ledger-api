@@ -72,3 +72,22 @@ class TestListUsersByStatus:
                 ],
                 "nextCursor": None,
             }
+
+    class TestGivenACustomer:
+        def test_refuses_with_403_forbidden(self, handler: Handler) -> None:
+            status, body = call(handler, "GET /api/v1/admin/users", auth=CUSTOMER, query={"status": "pending"})
+
+            assert (status, body["error"]["code"]) == (403, "forbidden")
+
+    class TestGivenAMissingOrUnknownStatus:
+        @pytest.mark.parametrize(
+            "query", [pytest.param({}, id="missing"), pytest.param({"status": "gone"}, id="unknown")]
+        )
+        def test_refuses_with_400_validation_failed_naming_the_field(
+            self, handler: Handler, query: dict[str, str]
+        ) -> None:
+            status, body = call(handler, "GET /api/v1/admin/users", query=query)
+
+            assert (status, body["error"]["code"]) == (400, "validation_failed")
+            assert body["error"]["message"] == "Query is invalid"
+            assert [issue["path"] for issue in body["error"]["details"]] == [["status"]]
