@@ -4,7 +4,7 @@ import re
 from datetime import date
 from typing import Annotated, Literal, NotRequired, Required, TypedDict
 
-from pydantic import AfterValidator, Field, StrictInt, StrictStr, StringConstraints, TypeAdapter
+from pydantic import AfterValidator, Field, StrictInt, StrictStr, StringConstraints, TypeAdapter, WithJsonSchema
 
 from ledger_api.data.ulid import is_ulid
 
@@ -36,24 +36,29 @@ def _ulid(value: str) -> str:
     return value
 
 
-type IsoDate = Annotated[StrictStr, AfterValidator(_iso_date)]
+type IsoDate = Annotated[StrictStr, AfterValidator(_iso_date), WithJsonSchema({"type": "string", "format": "date"})]
 type Merchant = Annotated[StrictStr, StringConstraints(strip_whitespace=True, max_length=100)]
 type Item = Annotated[StrictStr, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 type AmountCents = Annotated[StrictInt, Field(gt=0, le=MAX_SAFE_INTEGER)]
 type Note = Annotated[StrictStr, StringConstraints(strip_whitespace=True, max_length=1000)]
 
 
-class NewTransaction(TypedDict):
-    """What a client sends to record one; `id` and `currency` are fixed once created. Unknown keys are dropped."""
+class TransactionFields(TypedDict):
+    """The fields a customer edits. Unknown keys are dropped."""
 
-    id: Annotated[StrictStr, AfterValidator(_ulid)]
     date: IsoDate
     merchant: NotRequired[Merchant]
     category: Category
     item: Item
     amountCents: AmountCents
-    currency: Literal["AUD"]
     note: NotRequired[Note]
+
+
+class NewTransaction(TransactionFields):
+    """What a client sends to record one; `id` and `currency` are fixed once created."""
+
+    id: Annotated[StrictStr, AfterValidator(_ulid)]
+    currency: Literal["AUD"]
 
 
 class TransactionEdit(TypedDict, total=False):
@@ -93,6 +98,7 @@ class Transaction(NewTransaction):
     updatedAt: str
 
 
+TRANSACTION_FIELDS = TypeAdapter(TransactionFields)
 NEW_TRANSACTION = TypeAdapter(NewTransaction)
 TRANSACTION_EDIT = TypeAdapter(TransactionEdit)
 LIST_QUERY = TypeAdapter(ListQuery)
