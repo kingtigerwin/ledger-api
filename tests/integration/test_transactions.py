@@ -119,3 +119,14 @@ class TestEditATransaction:
             assert status == 200
             assert res | {"amountCents": 12000, "note": "plus fruit", "item": "菜", "version": 2} == res
             assert get(handler, "tx-house-f", body["id"]) == (200, res)
+
+    class TestGivenAVersionSomeoneElseAlreadyChanged:
+        def test_refuses_with_409_version_conflict_and_keeps_their_change(self, handler: Handler) -> None:
+            body = expense()
+            create(handler, "tx-house-g", body)
+            patch(handler, "tx-house-g", body["id"], {"version": 1, "amountCents": 5000})
+
+            status, res = patch(handler, "tx-house-g", body["id"], {"version": 1, "amountCents": 7000})
+
+            assert (status, res["error"]["code"]) == (409, "version_conflict")
+            assert get(handler, "tx-house-g", body["id"])[1]["amountCents"] == 5000
