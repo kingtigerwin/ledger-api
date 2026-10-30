@@ -66,6 +66,13 @@ def payload(reply: Reply) -> Any:
     return json.loads(body["result"]["content"][0]["text"])
 
 
+def failure(reply: Reply) -> str:
+    """A failed tool call's message."""
+    _, body = reply
+    assert body["result"]["isError"], body
+    return body["result"]["content"][0]["text"]
+
+
 def own(ledger: Ledger, user_id: str) -> list[Any]:
     """What the customer would see over REST."""
     return ledger.list(user_id, {"from": "2026-10-01"})["items"]
@@ -140,6 +147,13 @@ class TestPostMcp:
             fetched = payload(call_tool(mcp, customer("mcp-get"), "get_transaction", {"id": created["id"]}))
 
             assert fetched == created
+
+        def test_get_transaction_cant_see_another_customers_transaction(self, mcp: Handler) -> None:
+            theirs = payload(call_tool(mcp, customer("mcp-get-owner"), "create_transaction", CAKE))
+
+            message = failure(call_tool(mcp, customer("mcp-get-other"), "get_transaction", {"id": theirs["id"]}))
+
+            assert "no such transaction" in message.lower()
 
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
