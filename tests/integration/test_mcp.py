@@ -277,6 +277,15 @@ class TestPostMcp:
 
             assert ledger.get("mcp-del-owner", theirs["id"]) == theirs
 
+    class TestGivenAnExpenseTheApiWouldReject:
+        def test_reports_a_tool_error_naming_the_field_and_records_nothing(self, mcp: Handler, ledger: Ledger) -> None:
+            message = failure(
+                call_tool(mcp, customer("mcp-invalid"), "create_transaction", CAKE | {"category": "cake"})
+            )
+
+            assert "category" in message
+            assert own(ledger, "mcp-invalid") == []
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
