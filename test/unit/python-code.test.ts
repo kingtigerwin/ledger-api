@@ -53,7 +53,14 @@ describe("given the Python functions' code", () => {
     }
   });
 
-  // /var/task is read-only, so without bytecode every cold start compiles pydantic and the MCP SDK from source.
+  it("holds ledger_api.mcp only for Mcp, the one function that has the SDK it imports", () => {
+    for (const [id, listed] of files) {
+      const hasMcpModule = listed.includes(path.join("ledger_api", "mcp", "handler.py"));
+      expect([id, hasMcpModule]).toEqual([id, id.startsWith("Mcp")]);
+    }
+  });
+
+  // /var/task is read-only, so without bytecode every cold start compiles pydantic (and the MCP SDK) from source.
   it("ships bytecode for Python 3.13 beside every module, checked by hash rather than file times", () => {
     for (const [id, listed] of files) {
       const present = new Set(listed);
@@ -64,18 +71,25 @@ describe("given the Python functions' code", () => {
       });
       expect(missing).toEqual([]);
       // PEP 552: flags 0b01 is unchecked-hash, so the copy into the asset (new mtimes) doesn't invalidate it.
-      const pyc = readFileSync(path.join(assets.get(id)!, "ledger_api", "mcp", "__pycache__", "handler.cpython-313.pyc"));
+      const pyc = readFileSync(path.join(assets.get(id)!, "ledger_api", "data", "__pycache__", "handler.cpython-313.pyc"));
       expect(pyc.readUInt32LE(4)).toBe(0b01);
     }
   });
 
-  it("vendors pydantic and the MCP SDK for arm64 Linux, and leaves out boto3, which the runtime provides", () => {
+  it("vendors pydantic for arm64 Linux, and leaves out boto3, which the runtime provides", () => {
     for (const listed of files.values()) {
       const top = new Set(listed.map((f) => f.split(path.sep)[0]));
       expect(top.has("pydantic")).toBe(true);
-      expect(top.has("mcp")).toBe(true);
       expect(listed.some((f) => /^pydantic_core\/_pydantic_core\..*aarch64-linux-gnu\.so$/.test(f))).toBe(true);
       expect(top.has("boto3") || top.has("botocore")).toBe(false);
+    }
+  });
+
+  // The SDK and what it pulls in (starlette, cryptography, ...) grow the bundle fivefold, and with it every cold start.
+  it("vendors the MCP SDK for Mcp only", () => {
+    for (const [id, listed] of files) {
+      const hasSdk = listed.some((f) => f.split(path.sep)[0] === "mcp");
+      expect([id, hasSdk]).toEqual([id, id.startsWith("Mcp")]);
     }
   });
 });
