@@ -28,7 +28,7 @@ const uvBundling: ILocalBundling = {
         "--python-platform", "aarch64-manylinux2014", "--python-version", "3.13", "--only-binary", ":all:",
       ]);
     } catch (err) {
-      throw new Error(`Bundling the Python Lambdas needs uv (https://docs.astral.sh/uv/): ${String(err)}`);
+      throw new Error("Bundling the Python Lambdas needs uv (https://docs.astral.sh/uv/)", { cause: err });
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
