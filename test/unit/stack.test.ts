@@ -74,6 +74,20 @@ describe("LedgerStack", () => {
     }
   });
 
+  it("serves the admin routes from Python, with the Users table's name", () => {
+    const [, admin] = Object.entries(template.findResources("AWS::Lambda::Function")).find(([id]) =>
+      id.startsWith("AdminFunction"),
+    )!;
+    expect(admin.Properties).toMatchObject({
+      Runtime: "python3.13",
+      Handler: "ledger_api.admin.lambda_function.handler",
+      Architectures: ["arm64"],
+      LoggingConfig: { LogFormat: "JSON" },
+      MemorySize: 256,
+      Environment: { Variables: { USERS_TABLE: Match.anyValue() } },
+    });
+  });
+
   it("runs the bootstrap on deploy, allowed to create both SSM parameters", () => {
     template.resourceCountIs("AWS::CloudFormation::CustomResource", 1);
     const policies = Object.values(template.findResources("AWS::IAM::Policy"));
