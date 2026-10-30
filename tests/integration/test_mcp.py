@@ -218,6 +218,41 @@ class TestPostMcp:
                 ],
             }
 
+        def test_update_transaction_applies_a_change_at_the_current_version(self, mcp: Handler, ledger: Ledger) -> None:
+            who = customer("mcp-update")
+            created = payload(call_tool(mcp, who, "create_transaction", CAKE))
+
+            updated = payload(
+                call_tool(
+                    mcp,
+                    who,
+                    "update_transaction",
+                    {"id": created["id"], "version": 1, "amountCents": 3500, "note": "and candles"},
+                )
+            )
+
+            assert updated == created | {
+                "version": 2,
+                "amountCents": 3500,
+                "note": "and candles",
+                "updatedAt": updated["updatedAt"],
+            }
+            assert ledger.get("mcp-update", created["id"]) == updated
+
+        def test_update_transaction_refuses_a_stale_version_and_keeps_the_newer_change(
+            self, mcp: Handler, ledger: Ledger
+        ) -> None:
+            who = customer("mcp-stale")
+            created = payload(call_tool(mcp, who, "create_transaction", CAKE))
+            payload(call_tool(mcp, who, "update_transaction", {"id": created["id"], "version": 1, "amountCents": 3500}))
+
+            message = failure(
+                call_tool(mcp, who, "update_transaction", {"id": created["id"], "version": 1, "amountCents": 1})
+            )
+
+            assert "changed" in message
+            assert ledger.get("mcp-stale", created["id"])["amountCents"] == 3500
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
