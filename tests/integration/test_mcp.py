@@ -59,6 +59,16 @@ def call_tool(mcp: Handler, auth: dict[str, str], name: str, arguments: dict[str
     return rpc(mcp, auth, "tools/call", {"name": name, "arguments": arguments})
 
 
+def record(mcp: Handler, auth: dict[str, str], *expenses: tuple[str, str, int]) -> None:
+    """Records cake-like expenses, each as (date, category, amountCents)."""
+    for date, category, amount in expenses:
+        payload(
+            call_tool(
+                mcp, auth, "create_transaction", CAKE | {"date": date, "category": category, "amountCents": amount}
+            )
+        )
+
+
 def payload(reply: Reply) -> Any:
     """A successful tool call's JSON payload."""
     _, body = reply
@@ -163,11 +173,13 @@ class TestPostMcp:
             self, mcp: Handler
         ) -> None:
             who = customer("mcp-list-own")
-            for date, category, amount in [("2026-10-01", "groceries", 100), ("2026-10-02", "dining", 200),
-                                           ("2026-10-03", "groceries", 300)]:  # fmt: skip
-                call_tool(
-                    mcp, who, "create_transaction", CAKE | {"date": date, "category": category, "amountCents": amount}
-                )
+            record(
+                mcp,
+                who,
+                ("2026-10-01", "groceries", 100),
+                ("2026-10-02", "dining", 200),
+                ("2026-10-03", "groceries", 300),
+            )
 
             first = payload(call_tool(mcp, who, "list_transactions", {"limit": 2}))
             second = payload(call_tool(mcp, who, "list_transactions", {"limit": 2, "cursor": first["nextCursor"]}))
@@ -185,11 +197,14 @@ class TestPostMcp:
 
         def test_get_monthly_summary_totals_a_month_by_category_largest_first(self, mcp: Handler) -> None:
             who = customer("mcp-summary")
-            for date, category, amount in [("2026-09-30", "groceries", 9999), ("2026-10-05", "dining", 1500),
-                                           ("2026-10-06", "groceries", 3000), ("2026-10-07", "groceries", 500)]:  # fmt: skip
-                call_tool(
-                    mcp, who, "create_transaction", CAKE | {"date": date, "category": category, "amountCents": amount}
-                )
+            record(
+                mcp,
+                who,
+                ("2026-09-30", "groceries", 9999),
+                ("2026-10-05", "dining", 1500),
+                ("2026-10-06", "groceries", 3000),
+                ("2026-10-07", "groceries", 500),
+            )
 
             summary = payload(call_tool(mcp, who, "get_monthly_summary", {"month": "2026-10"}))
 
