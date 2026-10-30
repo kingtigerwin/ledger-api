@@ -10,6 +10,7 @@ from ledger_api.http import (
     no_content,
     parse_body,
     parse_query,
+    require_admin,
     with_errors,
 )
 
@@ -55,6 +56,9 @@ def create_data_handler(*, ledger: Ledger) -> Handler:
             case "GET /api/v1/transactions/summary":
                 user_id = _require_scope(event, "transactions:read")
                 return json_response(200, ledger.summary(user_id, parse_query(event, SUMMARY_QUERY)["month"]))
+            case "GET /api/v1/admin/users/{id}/transactions":
+                require_admin(event, "admin:read")
+                return json_response(200, ledger.list(_param(event, "id"), parse_query(event, LIST_QUERY)))
             case route:
                 raise ApiError(404, "route_not_found", f"No route for {route}")
 
