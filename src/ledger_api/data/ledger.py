@@ -1,9 +1,13 @@
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ledger_api.data.schemas import NewTransaction, Transaction
 from ledger_api.data.transactions_store import TransactionsStore
+from ledger_api.data.ulid import ulid_time
 from ledger_api.http import ApiError
+
+# Client clocks drift a little; an ID from further ahead than this would distort the sort order.
+MAX_CLOCK_SKEW = timedelta(minutes=5)
 
 
 def _not_found() -> ApiError:
@@ -24,7 +28,10 @@ class Ledger:
 
     def record(self, user_id: str, new: NewTransaction) -> tuple[Transaction, bool]:
         """Records the transaction; a retry with the same id returns what was stored, with `created` False."""
-        return self._transactions.create_once(user_id, new, self._now())
+        now = self._now()
+        if ulid_time(new["id"]) > now + MAX_CLOCK_SKEW:
+            raise ApiError(400, "invalid_id", "The id's timestamp is in the future")
+        return self._transactions.create_once(user_id, new, now)
 
     def get(self, user_id: str, id: str) -> Transaction:
         transaction = self._transactions.get(user_id, id)
