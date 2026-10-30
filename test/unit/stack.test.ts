@@ -74,6 +74,25 @@ describe("LedgerStack", () => {
     }
   });
 
+  it("serves the transaction routes from Python, with the Data table's name and the signing secret", () => {
+    const [, data] = Object.entries(template.findResources("AWS::Lambda::Function")).find(([id]) =>
+      id.startsWith("DataFunction"),
+    )!;
+    expect(data.Properties).toMatchObject({
+      Runtime: "python3.13",
+      Handler: "ledger_api.data.lambda_function.handler",
+      Architectures: ["arm64"],
+      LoggingConfig: { LogFormat: "JSON" },
+      MemorySize: 256,
+      Environment: { Variables: { DATA_TABLE: { Ref: expect.stringMatching(/^DataTable/) } } },
+    });
+    const role = data.Properties.Role["Fn::GetAtt"][0];
+    const [, policy] = Object.entries(template.findResources("AWS::IAM::Policy")).find(
+      ([, p]) => p.Properties.Roles.some((r: { Ref: string }) => r.Ref === role),
+    )!;
+    expect(JSON.stringify(policy.Properties.PolicyDocument)).toContain("ssm:GetParameter");
+  });
+
   it("serves the admin routes from Python, with the Users table's name", () => {
     const [, admin] = Object.entries(template.findResources("AWS::Lambda::Function")).find(([id]) =>
       id.startsWith("AdminFunction"),

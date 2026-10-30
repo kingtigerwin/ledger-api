@@ -3,8 +3,11 @@ name = "ledger-api"
 version = "0.1.0"
 description = "The Python Lambdas of ledger-api, moving over from TypeScript one at a time"
 requires-python = ">=3.13"
-# Only what the Lambda Python runtime already has, so the functions deploy as plain source.
-dependencies = ["boto3>=1.43.119"]
+# boto3 comes with the Lambda runtime; the rest is bundled for arm64 Linux at synth (lib/python-code.ts).
+dependencies = [
+    "boto3>=1.43.119",
+    "pydantic>=2.14.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]
@@ -12,7 +15,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "boto3-stubs[dynamodb,dynamodbstreams,sesv2]>=1.43.119",
+    "boto3-stubs[dynamodb,dynamodbstreams,sesv2,ssm]>=1.43.119",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "ruff>=0.17.3",

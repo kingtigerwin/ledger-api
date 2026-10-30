@@ -17,7 +17,7 @@ import { Alarm, ComparisonOperator, Metric, TreatMissingData } from "aws-cdk-lib
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { AttributeType, Billing, StreamViewType, TableV2 } from "aws-cdk-lib/aws-dynamodb";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
-import { Architecture, Code, FilterCriteria, FilterRule, Function as LambdaFunction, type FunctionProps, LoggingFormat, Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
+import { Architecture, FilterCriteria, FilterRule, Function as LambdaFunction, type FunctionProps, type IFunction, LoggingFormat, Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
 import { DynamoEventSource, SqsDlq } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction, type NodejsFunctionProps } from "aws-cdk-lib/aws-lambda-nodejs";
 import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from "aws-cdk-lib/aws-logs";
@@ -31,6 +31,7 @@ import { AaaaRecord, ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-r
 import { CloudFrontTarget } from "aws-cdk-lib/aws-route53-targets";
 import type { Construct } from "constructs";
 import type { CustomDomain } from "./certificate-stack";
+import { pythonCode } from "./python-code";
 import { usersTableKeys } from "../src/auth/users-table";
 import { ADMIN_PASSWORD_PARAM, SIGNING_SECRET_PARAM } from "../src/config";
 import { dataTableKeys } from "../src/data/data-table";
@@ -99,13 +100,10 @@ export class LedgerStack extends Stack {
       });
       return fn;
     };
-    // The Lambdas moving to Python. boto3 comes with the runtime, so the code is the ledger_api
-    // package as it stands, with nothing to bundle.
+    // The Lambdas moving to Python, all from one bundle (lib/python-code.ts).
     const makePythonFunction = (name: string, module: string, props: Partial<FunctionProps> = {}) =>
       new LambdaFunction(this, `${name}Function`, {
-        code: Code.fromAsset(path.join(__dirname, "../src"), {
-          exclude: ["*", "!ledger_api", "!ledger_api/**", "**/__pycache__"],
-        }),
+        code: pythonCode(),
         handler: `ledger_api.${module}.lambda_function.handler`,
         runtime: Runtime.PYTHON_3_13,
         architecture: Architecture.ARM_64,
@@ -114,7 +112,7 @@ export class LedgerStack extends Stack {
         logGroup: new LogGroup(this, `${name}Logs`, { retention: RetentionDays.TWO_WEEKS }),
         ...props,
       });
-    const canReadSigningSecret = (fn: NodejsFunction) =>
+    const canReadSigningSecret = (fn: IFunction) =>
       fn.addToRolePolicy(
         new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [parameterArn(SIGNING_SECRET_PARAM)] }),
       );
@@ -158,7 +156,7 @@ export class LedgerStack extends Stack {
     });
     usersTable.grantReadWriteData(adminFunction);
 
-    const dataFunction = makeFunction("Data", "data/lambda.ts", {
+    const dataFunction = makePythonFunction("Data", "data", {
       memorySize: 256,
       environment: { DATA_TABLE: dataTable.tableName },
     });

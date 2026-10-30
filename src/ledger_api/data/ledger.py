@@ -1,0 +1,126 @@
+from collections.abc import Callable
+from datetime import datetime, timedelta
+from typing import Any
+
+from botocore.exceptions import ClientError
+
+from ledger_api.data.cursor import InvalidCursorError, decode_cursor, encode_cursor
+from ledger_api.data.schemas import DEFAULT_LIMIT, ListQuery, NewTransaction, Transaction, TransactionEdit
+from ledger_api.data.transactions_store import (
+    ListRange,
+    Page,
+    TransactionNotFoundError,
+    TransactionsStore,
+    VersionConflictError,
+)
+from ledger_api.data.ulid import ulid_time
+from ledger_api.http import ApiError
+
+# Client clocks drift a little; an ID from further ahead than this would distort the sort order.
+MAX_CLOCK_SKEW = timedelta(minutes=5)
+
+
+def _invalid_cursor() -> ApiError:
+    return ApiError(400, "invalid_cursor", "The cursor is invalid; start from the first page")
+
+
+def _not_found() -> ApiError:
+    return ApiError(404, "transaction_not_found", "No such transaction")
+
+
+class Ledger:
+    """
+    What a customer (or the admin) can do with transactions, like src/data/ledger.ts: the REST
+    handler calls this, and so will the MCP tools once they move. Failures are `ApiError`s.
+    """
+
+    def __init__(self, transactions: TransactionsStore, *, cursor_secret: str, now: Callable[[], datetime]) -> None:
+        self._transactions = transactions
+        # Signs list cursors so clients can't tamper with them.
+        self._cursor_secret = cursor_secret
+        self._now = now
+
+    def record(self, user_id: str, new: NewTransaction) -> tuple[Transaction, bool]:
+        """Records the transaction; a retry with the same id returns what was stored, with `created` False."""
+        now = self._now()
+        if ulid_time(new["id"]) > now + MAX_CLOCK_SKEW:
+            raise ApiError(400, "invalid_id", "The id's timestamp is in the future")
+        return self._transactions.create_once(user_id, new, now)
+
+    def get(self, user_id: str, id: str) -> Transaction:
+        transaction = self._transactions.get(user_id, id)
+        if not transaction:
+            raise _not_found()
+        return transaction
+
+    def update(self, user_id: str, id: str, edit: TransactionEdit) -> Transaction:
+        try:
+            return self._transactions.update(user_id, id, edit, self._now())
+        except TransactionNotFoundError:
+            raise _not_found() from None
+        except VersionConflictError:
+            raise ApiError(
+                409, "version_conflict", "Someone else changed this transaction; reload it and try again"
+            ) from None
+
+    def remove(self, user_id: str, id: str) -> None:
+        try:
+            self._transactions.delete(user_id, id)
+        except TransactionNotFoundError:
+            raise _not_found() from None
+
+    def _page[T](
+        self, query: ListQuery, lister: Callable[[ListRange, dict[str, Any] | None], Page[T]]
+    ) -> dict[str, Any]:
+        """One page from `lister` (one customer's transactions, or everyone's), with a signed next-page cursor."""
+        cursor = query.get("cursor")
+        try:
+            start_key = decode_cursor(cursor, self._cursor_secret) if cursor else None
+        except InvalidCursorError:
+            raise _invalid_cursor() from None
+        span = ListRange(
+            date_from=query.get("from"),
+            date_to=query.get("to"),
+            category=query.get("category"),
+            limit=query.get("limit", DEFAULT_LIMIT),
+        )
+        try:
+            items, last_key = lister(span, start_key)
+        except ClientError as err:
+            # A genuine cursor from a different filter has keys this query can't start from. DynamoDB's
+            # client models no ValidationException, so match the code.
+            if start_key and err.response.get("Error", {}).get("Code") == "ValidationException":
+                raise _invalid_cursor() from None
+            raise
+        return {"items": items, "nextCursor": encode_cursor(last_key, self._cursor_secret) if last_key else None}
+
+    def list(self, user_id: str, query: ListQuery) -> dict[str, Any]:
+        """One page of the customer's transactions."""
+        return self._page(query, lambda span, start_key: self._transactions.list(user_id, span, start_key))
+
+    def list_all(self, query: ListQuery) -> dict[str, Any]:
+        """One page of every customer's transactions, for the admin."""
+        return self._page(query, self._transactions.list_all)
+
+    def summary(self, user_id: str, month: str) -> dict[str, Any]:
+        """
+        Totals for one month, computed on request. A customer records a few hundred transactions a month,
+        so reading them all is cheap; precomputed totals would be the upgrade if that changes.
+        """
+        by_category: dict[str, int] = {}
+        start_key: dict[str, Any] | None = None
+        while True:
+            # Day 31 is a safe upper bound for every month: sort keys compare as strings.
+            span = ListRange(date_from=f"{month}-01", date_to=f"{month}-31", category=None, limit=100)
+            items, start_key = self._transactions.list(user_id, span, start_key)
+            for t in items:
+                by_category[t["category"]] = by_category.get(t["category"], 0) + t["amountCents"]
+            if not start_key:
+                break
+        ranked = sorted(by_category.items(), key=lambda entry: (-entry[1], entry[0]))
+        return {
+            "month": month,
+            "currency": "AUD",
+            "totalCents": sum(by_category.values()),
+            "byCategory": [{"category": category, "totalCents": total} for category, total in ranked],
+        }
