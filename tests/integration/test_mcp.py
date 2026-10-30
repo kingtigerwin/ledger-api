@@ -314,6 +314,27 @@ class TestPostMcp:
             assert name in message
             assert own(ledger, "mcp-read-only") == []
 
+    class TestGivenAFailureTheLedgerDidntExpect:
+        def test_reports_a_generic_tool_error_and_logs_the_cause(
+            self, data_table: "Table", table: "Table", capsys: pytest.CaptureFixture[str]
+        ) -> None:
+            class BrokenLedger(Ledger):
+                def get(self, user_id: str, id: str) -> Any:
+                    raise RuntimeError("table unreachable")
+
+            broken = BrokenLedger(TransactionsStore(data_table), cursor_secret="x", now=lambda: datetime.now(UTC))
+            mcp = create_mcp_handler(ledger=broken, users=UsersStore(table), now=lambda: datetime.now(UTC))
+
+            message = failure(
+                call_tool(mcp, customer("mcp-broken"), "get_transaction", {"id": "01J0000000000000000000000A"})
+            )
+
+            assert message == "Something went wrong; try again"
+            logged = json.loads(capsys.readouterr().err)
+            assert logged["event"] == "mcp_tool_failed"
+            assert logged["tool"] == "get_transaction"
+            assert logged["err"]["message"] == "table unreachable"
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
