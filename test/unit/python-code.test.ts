@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { App, Stack } from "aws-cdk-lib";
 import { Certificate } from "aws-cdk-lib/aws-certificatemanager";
@@ -12,6 +12,7 @@ type Resources = Record<string, { Type: string; Properties: Record<string, unkno
 
 describe("given the Python functions' code", () => {
   let files: Map<string, string[]>;
+  let assets: Map<string, string>;
 
   beforeAll(() => {
     const app = new App({
@@ -24,16 +25,18 @@ describe("given the Python functions' code", () => {
     new LedgerStack(app, "LedgerApi", { env, customDomain: { ...domain, certificate }, emailFrom: "noreply@example.cloud" });
     const assembly = app.synth();
     const resources = (assembly.getStackByName("LedgerApi").template as { Resources: Resources }).Resources;
-    files = new Map(
+    assets = new Map(
       Object.entries(resources)
         .filter(([, r]) => r.Type === "AWS::Lambda::Function" && String(r.Properties.Runtime).startsWith("python"))
-        .map(([id, r]) => {
-          const asset = path.join(assembly.directory, r.Metadata!["aws:asset:path"]!);
-          const listed = readdirSync(asset, { recursive: true, withFileTypes: true })
-            .filter((f) => f.isFile())
-            .map((f) => path.relative(asset, path.join(f.parentPath, f.name)));
-          return [id, listed];
-        }),
+        .map(([id, r]) => [id, path.join(assembly.directory, r.Metadata!["aws:asset:path"]!)]),
+    );
+    files = new Map(
+      [...assets].map(([id, asset]) => {
+        const listed = readdirSync(asset, { recursive: true, withFileTypes: true })
+          .filter((f) => f.isFile())
+          .map((f) => path.relative(asset, path.join(f.parentPath, f.name)));
+        return [id, listed] as const;
+      }),
     );
   }, 120_000);
 
@@ -41,12 +44,28 @@ describe("given the Python functions' code", () => {
     expect([...files.keys()].map((id) => id.replace(/Function.*/, "")).sort()).toEqual(["Admin", "Data", "Mcp", "Notify"]);
   });
 
-  it("holds the ledger_api package as Python source only, without the TypeScript beside it or compiled caches", () => {
+  it("holds the ledger_api package as Python, without the TypeScript beside it", () => {
     for (const listed of files.values()) {
       const own = listed.filter((f) => f.startsWith(`ledger_api${path.sep}`));
       expect(own).toContain(path.join("ledger_api", "data", "lambda_function.py"));
-      expect(own.every((f) => f.endsWith(".py"))).toBe(true);
-      expect(listed.some((f) => f.endsWith(".ts") || f.includes("__pycache__"))).toBe(false);
+      expect(own.every((f) => f.endsWith(".py") || f.endsWith(".cpython-313.pyc"))).toBe(true);
+      expect(listed.some((f) => f.endsWith(".ts"))).toBe(false);
+    }
+  });
+
+  // /var/task is read-only, so without bytecode every cold start compiles pydantic and the MCP SDK from source.
+  it("ships bytecode for Python 3.13 beside every module, checked by hash rather than file times", () => {
+    for (const [id, listed] of files) {
+      const present = new Set(listed);
+      const sources = listed.filter((f) => f.endsWith(".py") && !f.includes(`${path.sep}tests${path.sep}`));
+      const missing = sources.filter((f) => {
+        const pyc = path.join(path.dirname(f), "__pycache__", `${path.basename(f, ".py")}.cpython-313.pyc`);
+        return !present.has(pyc);
+      });
+      expect(missing).toEqual([]);
+      // PEP 552: flags 0b01 is unchecked-hash, so the copy into the asset (new mtimes) doesn't invalidate it.
+      const pyc = readFileSync(path.join(assets.get(id)!, "ledger_api", "mcp", "__pycache__", "handler.cpython-313.pyc"));
+      expect(pyc.readUInt32LE(4)).toBe(0b01);
     }
   });
 

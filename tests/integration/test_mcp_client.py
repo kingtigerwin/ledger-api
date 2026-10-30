@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
+from mcp import ClientSession, types
 from mcp.client.streamable_http import streamable_http_client
 
 from ledger_api.auth.users_store import UsersStore
@@ -16,7 +17,6 @@ from ledger_api.data.ledger import Ledger
 from ledger_api.data.transactions_store import TransactionsStore
 from ledger_api.http import Handler
 from ledger_api.mcp.handler import create_mcp_handler
-from mcp import ClientSession, types
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table

@@ -1,4 +1,4 @@
-"""Signed list cursors, byte for byte as src/data/cursor.ts makes them, so REST and MCP cursors stay interchangeable."""
+"""Signed list cursors, byte for byte as the TypeScript API made them, so cursors clients already hold stay valid."""
 
 import base64
 import binascii
