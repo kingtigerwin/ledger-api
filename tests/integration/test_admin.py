@@ -2,11 +2,12 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from boto3.dynamodb.conditions import Key
 
 from ledger_api.admin.handler import create_admin_handler
 from ledger_api.auth.users_store import UsersStore
 from ledger_api.http import Handler
-from tests.integration.users import seed_user
+from tests.integration.users import seed_refresh_token, seed_user
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
@@ -107,3 +108,37 @@ class TestEnableUser:
             assert status == 200
             assert body == {**user, "status": "active"}
             assert profile(table, user["id"])["status"] == "active"
+
+    class TestGivenAnUnknownUserId:
+        def test_returns_404_user_not_found_without_creating_a_profile(self, handler: Handler, table: "Table") -> None:
+            status, body = call(handler, "POST /api/v1/admin/users/{id}/enable", params={"id": "no-such-user"})
+
+            assert (status, body["error"]["code"]) == (404, "user_not_found")
+            assert profile(table, "no-such-user") == {}
+
+
+def refresh_tokens(table: "Table", user_id: str) -> list[dict[str, Any]]:
+    return table.query(
+        KeyConditionExpression=Key("pk").eq(f"USER#{user_id}") & Key("sk").begins_with("REFRESH#"),
+        ConsistentRead=True,
+    ).get("Items", [])
+
+
+class TestDisableUser:
+    class TestGivenAnActiveSignedInCustomer:
+        def test_disables_them_and_deletes_every_refresh_token_so_refreshing_ends_now(
+            self, handler: Handler, table: "Table"
+        ) -> None:
+            rita = seed_user(table, "rita", "active")
+            other = seed_user(table, "other", "active")
+            for token_hash in ["laptop", "phone"]:
+                seed_refresh_token(table, rita["id"], token_hash)
+            seed_refresh_token(table, other["id"], "tablet")
+
+            status, body = call(handler, "POST /api/v1/admin/users/{id}/disable", params={"id": rita["id"]})
+
+            assert status == 200
+            assert body == {**rita, "status": "disabled"}
+            assert profile(table, rita["id"])["status"] == "disabled"
+            assert refresh_tokens(table, rita["id"]) == []
+            assert len(refresh_tokens(table, other["id"])) == 1
