@@ -63,3 +63,9 @@ class TestPostMcp:
             assert status == 200
             assert body["result"]["serverInfo"]["name"] == "ledger-api"
             assert "tools" in body["result"]["capabilities"]
+
+    class TestGivenNoAuthorizerContext:
+        def test_refuses_with_401(self, mcp: Handler) -> None:
+            status, _ = rpc(mcp, None, "tools/list")
+
+            assert status == 401
