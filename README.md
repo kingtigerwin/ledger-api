@@ -10,7 +10,7 @@ npm run db:up             # DynamoDB Local in Docker, for integration tests
 npm run typecheck && npm run lint
 npm test                  # unit + integration
 
-# The Lambdas moved to Python so far (notify); needs uv
+# The Lambdas moved to Python so far (notify, admin); needs uv
 uv sync
 uv run ruff check && uv run ruff format --check && uv run pyright
 uv run pytest             # unit + integration

@@ -4,7 +4,7 @@ A public API where customers record their spending. It's a learning and portfoli
 
 ## Stack
 
-- TypeScript, AWS CDK, Lambda (Node 22, arm64), API Gateway HTTP API, DynamoDB (on-demand). The Lambdas are moving to Python 3.13 (arm64) one at a time, to match the newer projects; `notify` has moved. The CDK stays TypeScript for now.
+- TypeScript, AWS CDK, Lambda (Node 22, arm64), API Gateway HTTP API, DynamoDB (on-demand). The Lambdas are moving to Python 3.13 (arm64) one at a time, to match the newer projects; `notify` and `admin` have moved. The CDK stays TypeScript for now.
 - CloudFront in front of the API at `/api/*` (no S3 origin in this stack; a UI may be added later as another origin).
 - Region `ap-southeast-2`. The app is one stack, `LedgerApi`; with a custom domain, a small `LedgerApiCertificate` stack in `us-east-1` holds its ACM certificate (CloudFront only accepts certificates from there), passed across with CDK cross-region references.
 - Custom domain: `api.haoran.cloud`, in the existing `haoran.cloud` Route 53 zone (which also serves another site). Configured in `cdk.json` (`customDomain`); the zone is imported by ID, never looked up (a lookup would put the account ID in `cdk.context.json`) and never modified apart from the API's `A`/`AAAA` alias records, ACM's validation record and SES's three DKIM `CNAME` records. The CloudFront domain keeps working.
