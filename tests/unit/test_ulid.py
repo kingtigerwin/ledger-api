@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ledger_api.data.ulid import is_ulid, ulid_time
+from ledger_api.data.ulid import is_ulid, new_ulid, ulid_time
 
 # From the ulid library's README: ulid(1469918176385) -> "01ARYZ6S41TSV4RRFFQ69G5FAV".
 SPEC_EXAMPLE = "01ARYZ6S41TSV4RRFFQ69G5FAV"
@@ -28,3 +28,13 @@ class TestGivenAULID:
     )
     def test_rejects_a_malformed_one(self, value: str) -> None:
         assert not is_ulid(value)
+
+
+class TestNewUlid:
+    def test_makes_a_ulid_that_reads_back_its_time_to_the_millisecond(self) -> None:
+        at = datetime(2026, 10, 30, 1, 2, 3, 456000, tzinfo=UTC)
+
+        ulid = new_ulid(at)
+
+        assert is_ulid(ulid)
+        assert ulid_time(ulid) == at
