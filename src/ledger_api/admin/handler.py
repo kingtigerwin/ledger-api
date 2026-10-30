@@ -1,4 +1,4 @@
-from typing import cast, get_args
+from typing import get_args
 
 from ledger_api.auth.users_store import UsersStore, UserStatus
 from ledger_api.http import ApiError, Event, Handler, Response, json_response, require_admin, with_errors
@@ -19,7 +19,7 @@ def _status_query(event: Event) -> UserStatus:
             "message": f"Invalid option: expected one of {expected}",
         }
         raise ApiError(400, "validation_failed", "Query is invalid", [issue])
-    return cast(UserStatus, status)
+    return status
 
 
 def create_admin_handler(*, users: UsersStore) -> Handler:
