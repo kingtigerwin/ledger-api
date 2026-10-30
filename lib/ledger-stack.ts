@@ -100,10 +100,10 @@ export class LedgerStack extends Stack {
       });
       return fn;
     };
-    // The Lambdas moving to Python, all from one bundle (lib/python-code.ts).
+    // The Lambdas moving to Python, from one bundle, or for MCP one with the SDK too (lib/python-code.ts).
     const makePythonFunction = (name: string, module: string, props: Partial<FunctionProps> = {}) =>
       new LambdaFunction(this, `${name}Function`, {
-        code: pythonCode(),
+        code: pythonCode({ withMcp: module === "mcp" }),
         handler: `ledger_api.${module}.lambda_function.handler`,
         runtime: Runtime.PYTHON_3_13,
         architecture: Architecture.ARM_64,

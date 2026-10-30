@@ -64,8 +64,8 @@ describe("given the Python functions' code", () => {
   });
 
   it("holds ledger_api.mcp only for Mcp, the one function that has the SDK it imports", () => {
-    for (const [id, listed] of files) {
-      const hasMcpModule = listed.includes(path.join("ledger_api", "mcp", "handler.py"));
+    for (const [id, asset] of assets) {
+      const hasMcpModule = readdirSync(path.join(asset, "ledger_api")).includes("mcp");
       expect([id, hasMcpModule]).toEqual([id, id.startsWith("Mcp")]);
     }
   });
