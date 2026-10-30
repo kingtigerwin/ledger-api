@@ -24,6 +24,12 @@ def _iso_date(value: str) -> str:
     return value
 
 
+def _month(value: str) -> str:
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", value):
+        raise ValueError("Must be YYYY-MM")
+    return value
+
+
 def _ulid(value: str) -> str:
     if not is_ulid(value):
         raise ValueError("Must be a ULID")
@@ -77,6 +83,10 @@ ListQuery = TypedDict(
 DEFAULT_LIMIT = 50
 
 
+class SummaryQuery(TypedDict):
+    month: Annotated[StrictStr, AfterValidator(_month)]
+
+
 class Transaction(NewTransaction):
     version: int
     createdAt: str
@@ -86,3 +96,4 @@ class Transaction(NewTransaction):
 NEW_TRANSACTION = TypeAdapter(NewTransaction)
 TRANSACTION_EDIT = TypeAdapter(TransactionEdit)
 LIST_QUERY = TypeAdapter(ListQuery)
+SUMMARY_QUERY = TypeAdapter(SummaryQuery)

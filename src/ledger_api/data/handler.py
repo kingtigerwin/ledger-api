@@ -1,5 +1,5 @@
 from ledger_api.data.ledger import Ledger
-from ledger_api.data.schemas import LIST_QUERY, NEW_TRANSACTION, TRANSACTION_EDIT
+from ledger_api.data.schemas import LIST_QUERY, NEW_TRANSACTION, SUMMARY_QUERY, TRANSACTION_EDIT
 from ledger_api.http import (
     ApiError,
     Event,
@@ -52,6 +52,9 @@ def create_data_handler(*, ledger: Ledger) -> Handler:
             case "GET /api/v1/transactions":
                 user_id = _require_scope(event, "transactions:read")
                 return json_response(200, ledger.list(user_id, parse_query(event, LIST_QUERY)))
+            case "GET /api/v1/transactions/summary":
+                user_id = _require_scope(event, "transactions:read")
+                return json_response(200, ledger.summary(user_id, parse_query(event, SUMMARY_QUERY)["month"]))
             case route:
                 raise ApiError(404, "route_not_found", f"No route for {route}")
 

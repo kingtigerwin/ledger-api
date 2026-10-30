@@ -86,3 +86,27 @@ class Ledger:
                 raise _invalid_cursor() from None
             raise
         return {"items": items, "nextCursor": encode_cursor(last_key, self._cursor_secret) if last_key else None}
+
+    def summary(self, user_id: str, month: str) -> dict[str, Any]:
+        """
+        Totals for one month, computed on request. A customer records a few hundred transactions a month,
+        so reading them all is cheap; precomputed totals would be the upgrade if that changes.
+        """
+        by_category: dict[str, int] = {}
+        start_key: dict[str, Any] | None = None
+        while True:
+            # Day 31 is a safe upper bound for every month: sort keys compare as strings.
+            items, start_key = self._transactions.list(
+                user_id, date_from=f"{month}-01", date_to=f"{month}-31", category=None, limit=100, start_key=start_key
+            )
+            for t in items:
+                by_category[t["category"]] = by_category.get(t["category"], 0) + t["amountCents"]
+            if not start_key:
+                break
+        ranked = sorted(by_category.items(), key=lambda entry: (-entry[1], entry[0]))
+        return {
+            "month": month,
+            "currency": "AUD",
+            "totalCents": sum(by_category.values()),
+            "byCategory": [{"category": category, "totalCents": total} for category, total in ranked],
+        }
