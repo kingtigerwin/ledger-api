@@ -30,6 +30,14 @@ class User:
         return body | {"role": self.role, "status": self.status, "createdAt": self.created_at}
 
 
+class UserNotFoundError(Exception):
+    pass
+
+
+def _profile_key(user_id: str) -> dict[str, str]:
+    return {"pk": f"USER#{user_id}", "sk": "PROFILE"}
+
+
 def _user(item: dict[str, Any]) -> User:
     return User(
         id=str(item["id"]),
@@ -60,3 +68,18 @@ class UsersStore:
                 break
             scan["ExclusiveStartKey"] = page["LastEvaluatedKey"]
         return sorted(users, key=lambda user: user.created_at)
+
+    def set_status(self, user_id: str, status: UserStatus) -> User:
+        """Raises UserNotFoundError rather than creating a profile for an unknown ID."""
+        try:
+            res = self._table.update_item(
+                Key=_profile_key(user_id),
+                UpdateExpression="SET #status = :status",
+                ConditionExpression=Attr("pk").exists(),
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={":status": status},
+                ReturnValues="ALL_NEW",
+            )
+        except self._table.meta.client.exceptions.ConditionalCheckFailedException:
+            raise UserNotFoundError(user_id) from None
+        return _user(res["Attributes"])

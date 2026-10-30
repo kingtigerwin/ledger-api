@@ -94,7 +94,7 @@ class TestListUsersByStatus:
 
 
 def profile(table: "Table", user_id: str) -> dict[str, Any]:
-    return table.get_item(Key={"pk": f"USER#{user_id}", "sk": "PROFILE"}, ConsistentRead=True)["Item"]
+    return table.get_item(Key={"pk": f"USER#{user_id}", "sk": "PROFILE"}, ConsistentRead=True).get("Item", {})
 
 
 class TestEnableUser:
