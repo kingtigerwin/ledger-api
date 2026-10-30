@@ -1,5 +1,5 @@
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -7,6 +7,7 @@ import pytest
 from ledger_api.data.handler import create_data_handler
 from ledger_api.data.ledger import Ledger
 from ledger_api.data.transactions_store import TransactionsStore
+from ledger_api.data.ulid import new_ulid
 from ledger_api.http import Handler
 from tests.integration.data import call, customer, expense
 
@@ -46,3 +47,56 @@ class TestRecordAndReadBack:
             # As JavaScript's toISOString() writes it, so rows from before the port sort and read the same.
             assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z", created[1]["createdAt"])
             assert fetched == (200, created[1])
+
+    class TestGivenAnotherCustomersTransactionId:
+        def test_returns_404(self, handler: Handler) -> None:
+            body = expense()
+            create(handler, "tx-house-b", body)
+
+            status, res = get(handler, "tx-house-c", body["id"])
+
+            assert (status, res["error"]["code"]) == (404, "transaction_not_found")
+
+    class TestGivenTheSameIdSentTwiceAsARetryWould:
+        def test_returns_the_original_record_with_200_and_keeps_a_single_transaction(self, handler: Handler) -> None:
+            body = expense()
+            _, first = create(handler, "tx-house-d", body)
+
+            retry = create(handler, "tx-house-d", {**body, "amountCents": 99999})
+
+            assert retry == (200, first)
+            assert get(handler, "tx-house-d", body["id"])[1]["amountCents"] == 10000
+
+    class TestGivenInvalidInput:
+        @pytest.mark.parametrize(
+            "overrides",
+            [
+                pytest.param({"id": "not-a-ulid"}, id="an id that isn't a ULID"),
+                pytest.param({"currency": "USD"}, id="a currency other than AUD"),
+                pytest.param({"amountCents": 0}, id="a zero amount"),
+                pytest.param({"amountCents": 10.5}, id="a fractional amount"),
+                pytest.param({"amountCents": "100"}, id="an amount as a string"),
+                pytest.param({"category": "gambling"}, id="an unknown category"),
+                pytest.param({"date": "2026-02-30"}, id="an impossible date"),
+                pytest.param({"date": "20261026"}, id="a date without dashes"),
+                pytest.param({"item": "   "}, id="a blank item"),
+                pytest.param({"merchant": None}, id="a null merchant"),
+            ],
+        )
+        def test_rejects_it_with_400_validation_failed(self, handler: Handler, overrides: dict[str, Any]) -> None:
+            status, res = create(handler, "tx-house-e", expense(**overrides))
+
+            assert (status, res["error"]["code"]) == (400, "validation_failed")
+
+        def test_rejects_an_id_dated_more_than_5_minutes_in_the_future(self, handler: Handler) -> None:
+            tomorrow = datetime.now(UTC) + timedelta(days=1)
+
+            status, res = create(handler, "tx-house-e", expense(id=new_ulid(tomorrow)))
+
+            assert (status, res["error"]["code"]) == (400, "invalid_id")
+
+        def test_ignores_a_member_id_which_transactions_no_longer_have(self, handler: Handler) -> None:
+            status, res = create(handler, "tx-house-e", {**expense(), "memberId": "mom"})
+
+            assert status == 201
+            assert "memberId" not in res
