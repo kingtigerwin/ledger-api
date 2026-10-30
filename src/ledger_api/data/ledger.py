@@ -2,7 +2,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from ledger_api.data.schemas import NewTransaction, Transaction, TransactionEdit
-from ledger_api.data.transactions_store import TransactionsStore, VersionConflictError
+from ledger_api.data.transactions_store import TransactionNotFoundError, TransactionsStore, VersionConflictError
 from ledger_api.data.ulid import ulid_time
 from ledger_api.http import ApiError
 
@@ -42,6 +42,8 @@ class Ledger:
     def update(self, user_id: str, id: str, edit: TransactionEdit) -> Transaction:
         try:
             return self._transactions.update(user_id, id, edit, self._now())
+        except TransactionNotFoundError:
+            raise _not_found() from None
         except VersionConflictError:
             raise ApiError(
                 409, "version_conflict", "Someone else changed this transaction; reload it and try again"

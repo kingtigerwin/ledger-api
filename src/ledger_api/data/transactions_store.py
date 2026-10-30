@@ -11,6 +11,10 @@ if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
 
 
+class TransactionNotFoundError(Exception):
+    pass
+
+
 class VersionConflictError(Exception):
     """Someone else changed the transaction since the client read it."""
 
@@ -126,7 +130,8 @@ class TransactionsStore:
         is moved: old item deleted, new one written and the pointer updated, atomically.
         """
         current = self.get(user_id, id)
-        assert current
+        if not current:
+            raise TransactionNotFoundError(id)
         if current["version"] != edit["version"]:
             raise VersionConflictError(id)
         changes = {k: v for k, v in edit.items() if k != "version"}
