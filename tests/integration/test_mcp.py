@@ -64,6 +64,18 @@ class TestPostMcp:
             assert body["result"]["serverInfo"]["name"] == "ledger-api"
             assert "tools" in body["result"]["capabilities"]
 
+    class TestGivenACustomerWhoCanRecordTransactions:
+        def test_lists_create_transaction_asking_only_for_what_the_customer_said(self, mcp: Handler) -> None:
+            _, body = rpc(mcp, customer("mcp-list"), "tools/list")
+
+            tool = next(t for t in body["result"]["tools"] if t["name"] == "create_transaction")
+            schema = tool["inputSchema"]
+            assert {"date", "category", "item", "amountCents"} <= set(schema["required"])
+            assert "groceries" in schema["properties"]["category"]["enum"]
+            assert schema["properties"]["date"]["format"] == "date"
+            assert "id" not in schema["properties"]
+            assert "currency" not in schema["properties"]
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
