@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+import * as path from "node:path";
 import { App, Stack } from "aws-cdk-lib";
 import { Certificate } from "aws-cdk-lib/aws-certificatemanager";
 import { Match, Template } from "aws-cdk-lib/assertions";
@@ -57,6 +59,14 @@ describe("given an email sender in the custom domain", () => {
     const [, notify] = Object.entries(template.findResources("AWS::Lambda::Function")).find(([id]) =>
       id.startsWith("NotifyFunction"),
     )!;
+    // Python, from the ledger_api package; boto3 comes with the runtime, so there's nothing to bundle.
+    expect(notify.Properties).toMatchObject({
+      Runtime: "python3.13",
+      Handler: "ledger_api.notify.lambda_function.handler",
+      Architectures: ["arm64"],
+      LoggingConfig: { LogFormat: "JSON" },
+      MemorySize: 128,
+    });
     // The admin's address comes from deploy-time context (a GitHub variable), never from source.
     expect(notify.Properties.Environment.Variables).toEqual({
       EMAIL_FROM: "noreply@example.cloud",
@@ -156,6 +166,28 @@ describe("given an email sender in the custom domain", () => {
       [s.Action].flat().includes("ses:SendEmail"),
     );
     expect(JSON.stringify(sends)).toContain(":configuration-set/");
+  });
+});
+
+describe("given the notify function's code", () => {
+  it("is only the ledger_api Python package, without the TypeScript beside it or compiled caches", () => {
+    // The CLI turns this on; it records where each function's code was staged.
+    const app = new App({ context: { "aws:cdk:enable-asset-metadata": true } });
+    new LedgerStack(app, "LedgerApi", { env, customDomain: customDomain(app), emailFrom: "noreply@example.cloud" });
+    const assembly = app.synth();
+    const template = assembly.getStackByName("LedgerApi").template as {
+      Resources: Record<string, { Type: string; Metadata?: Record<string, string> }>;
+    };
+    const [, notify] = Object.entries(template.Resources).find(
+      ([id, r]) => id.startsWith("NotifyFunction") && r.Type === "AWS::Lambda::Function",
+    )!;
+    const asset = path.join(assembly.directory, notify.Metadata!["aws:asset:path"]!);
+
+    const files = readdirSync(asset, { recursive: true, withFileTypes: true })
+      .filter((f) => f.isFile())
+      .map((f) => path.relative(asset, path.join(f.parentPath, f.name)));
+    expect(files).toContain(path.join("ledger_api", "notify", "lambda_function.py"));
+    expect(files.every((f) => f.startsWith(`ledger_api${path.sep}`) && f.endsWith(".py"))).toBe(true);
   });
 });
 

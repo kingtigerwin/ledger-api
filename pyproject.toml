@@ -1,0 +1,36 @@
+[project]
+name = "ledger-api"
+version = "0.1.0"
+description = "The Python Lambdas of ledger-api, moving over from TypeScript one at a time"
+requires-python = ">=3.13"
+# Only what the Lambda Python runtime already has, so the functions deploy as plain source.
+dependencies = ["boto3>=1.43.119"]
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "boto3-stubs[dynamodb,dynamodbstreams,sesv2]>=1.43.119",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "ruff>=0.17.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+include = ["src/**/*.py", "tests/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = ["**/node_modules", "**/__pycache__", "cdk.out"]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
