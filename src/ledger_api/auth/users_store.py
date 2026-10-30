@@ -73,6 +73,11 @@ class UsersStore:
         item = self._table.get_item(Key=_profile_key(user_id), ConsistentRead=True).get("Item")
         return _user(item) if item else None
 
+    def user_id_for(self, username: str) -> str | None:
+        """The ID behind a username, from its claim item; usernames are stored lower-case."""
+        item = self._table.get_item(Key={"pk": f"USERNAME#{username}", "sk": "USERNAME"}).get("Item")
+        return str(item["userId"]) if item else None
+
     def usernames(self, user_ids: list[str]) -> dict[str, str]:
         """Usernames by user ID; IDs with no profile are left out. BatchGet takes at most 100 keys a call."""
         found: dict[str, str] = {}

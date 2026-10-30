@@ -11,7 +11,14 @@ from pydantic import TypeAdapter, ValidationError
 
 from ledger_api.auth.users_store import UsersStore
 from ledger_api.data.ledger import Ledger
-from ledger_api.data.schemas import LIST_QUERY, SUMMARY_QUERY, TRANSACTION_FIELDS, TransactionEdit, TransactionFields
+from ledger_api.data.schemas import (
+    LIST_QUERY,
+    SUMMARY_QUERY,
+    TRANSACTION_FIELDS,
+    ListQuery,
+    TransactionEdit,
+    TransactionFields,
+)
 from ledger_api.data.ulid import new_ulid
 from ledger_api.http import ApiError, AuthContext, Event, Handler, Response, auth_context, issues, with_errors
 from ledger_api.log import log
@@ -65,6 +72,10 @@ def _inline(schema: dict[str, Any]) -> dict[str, Any]:
     return {key: resolve(value) for key, value in schema.items() if key not in ("title", "description")}
 
 
+def _list_query(query: ListAllQuery) -> ListQuery:
+    return cast(ListQuery, {key: value for key, value in query.items() if key != "username"})
+
+
 def _describe(err: ValidationError) -> str:
     """Each problem as `field: message`, which an agent can act on."""
     return "; ".join(
@@ -96,7 +107,15 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
         return {"id": ref["id"], "deleted": True}
 
     def list_all_transactions(caller: AuthContext, query: ListAllQuery) -> Any:
-        page = ledger.list_all(query)
+        if "username" in query:
+            username = query["username"]
+            # One customer's own partition, not a filter over everyone's.
+            customer_id = users.user_id_for(username)
+            if customer_id is None:
+                raise ApiError(404, "user_not_found", "No such user")
+            own = ledger.list(customer_id, _list_query(query))
+            return own | {"items": [t | {"userId": customer_id, "username": username} for t in own["items"]]}
+        page = ledger.list_all(_list_query(query))
         usernames = users.usernames([t["userId"] for t in page["items"]])
         return page | {"items": [t | {"username": usernames.get(t["userId"])} for t in page["items"]]}
 
