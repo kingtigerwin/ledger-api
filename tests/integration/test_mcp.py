@@ -20,6 +20,8 @@ def customer(user_id: str) -> dict[str, str]:
     return {"userId": user_id, "role": "customer", "scope": "transactions:read transactions:write"}
 
 
+READ_ONLY = {"userId": "mcp-read-only", "role": "customer", "scope": "transactions:read"}
+
 # "today I went to woolworth and bought 30 dollars for cake", as Claude would fill the tool in.
 CAKE = {"date": "2026-10-27", "merchant": "Woolworths", "category": "groceries", "item": "cake", "amountCents": 3000}
 
@@ -287,10 +289,8 @@ class TestPostMcp:
             assert own(ledger, "mcp-invalid") == []
 
     class TestGivenATokenWithoutTheTransactionsWriteScope:
-        READ_ONLY = {"userId": "mcp-read-only", "role": "customer", "scope": "transactions:read"}
-
         def test_offers_only_the_read_tools(self, mcp: Handler) -> None:
-            _, body = rpc(mcp, self.READ_ONLY, "tools/list")
+            _, body = rpc(mcp, READ_ONLY, "tools/list")
 
             assert sorted(t["name"] for t in body["result"]["tools"]) == [
                 "get_monthly_summary",
@@ -309,7 +309,7 @@ class TestPostMcp:
         def test_refuses_the_write_tools(
             self, mcp: Handler, ledger: Ledger, name: str, arguments: dict[str, Any]
         ) -> None:
-            message = failure(call_tool(mcp, self.READ_ONLY, name, arguments))
+            message = failure(call_tool(mcp, READ_ONLY, name, arguments))
 
             assert name in message
             assert own(ledger, "mcp-read-only") == []
