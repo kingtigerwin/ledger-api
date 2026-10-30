@@ -180,7 +180,10 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
         async def call_tool(
             ctx: ServerRequestContext[Any], params: types.CallToolRequestParams
         ) -> types.CallToolResult:
-            tool = next(tool for tool in offered if tool.name == params.name)
+            tool = next((tool for tool in offered if tool.name == params.name), None)
+            if tool is None:
+                # The same answer whether the tool doesn't exist or the caller may not use it.
+                return _text(f"No tool named {params.name}", is_error=True)
             try:
                 result = tool.run(caller, tool.schema.validate_python(params.arguments or {}))
             except ValidationError as err:
