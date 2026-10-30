@@ -1,11 +1,12 @@
 """Shared plumbing for the HTTP API's Lambdas, like src/http.ts."""
 
+import base64
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from ledger_api.log import log
 
@@ -55,8 +56,21 @@ def require_admin(event: Event, scope: Literal["admin:read", "admin:write"]) -> 
     return ctx
 
 
+def issues(err: ValidationError) -> list[dict[str, Any]]:
+    """Pydantic's errors in the shape zod gives the TypeScript routes: a code, the field's path and a message."""
+    return [{"code": e["type"], "path": list(e["loc"]), "message": e["msg"]} for e in err.errors()]
+
+
 def parse_body[T](event: Event, schema: TypeAdapter[T]) -> T:
-    return cast(T, {})
+    try:
+        text = event.get("body") or ""
+        raw = json.loads(base64.b64decode(text) if event.get("isBase64Encoded") else text)
+    except ValueError:
+        raise ApiError(400, "invalid_json", "Request body must be valid JSON") from None
+    try:
+        return schema.validate_python(raw)
+    except ValidationError as err:
+        raise ApiError(400, "validation_failed", "Request body is invalid", issues(err)) from None
 
 
 def json_response(status: int, body: Any) -> Response:
