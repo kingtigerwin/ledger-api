@@ -1,5 +1,6 @@
 """Shared plumbing for the HTTP API's Lambdas, like src/http.ts."""
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -20,8 +21,17 @@ class ApiError(Exception):
 
 
 def json_response(status: int, body: Any) -> Response:
-    raise NotImplementedError
+    return {"statusCode": status, "headers": {"content-type": "application/json"}, "body": json.dumps(body)}
 
 
 def with_errors(handler: Handler) -> Handler:
-    return handler
+    def wrapped(event: Event) -> Response:
+        try:
+            return handler(event)
+        except ApiError as err:
+            error: dict[str, Any] = {"code": err.code, "message": err.message}
+            if err.details is not None:
+                error["details"] = err.details
+            return json_response(err.status, {"error": error})
+
+    return wrapped
