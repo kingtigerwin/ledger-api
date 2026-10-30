@@ -66,6 +66,10 @@ def create_data_handler(*, ledger: Ledger) -> Handler:
                 require_admin(event, "admin:write")
                 edit = parse_body(event, TRANSACTION_EDIT)
                 return json_response(200, ledger.update(_param(event, "id"), _param(event, "transactionId"), edit))
+            case "DELETE /api/v1/admin/users/{id}/transactions/{transactionId}":
+                require_admin(event, "admin:write")
+                ledger.remove(_param(event, "id"), _param(event, "transactionId"))
+                return no_content()
             case route:
                 raise ApiError(404, "route_not_found", f"No route for {route}")
 
