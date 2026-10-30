@@ -158,3 +158,10 @@ class TestDisableUser:
 
             assert (status, body["error"]["code"]) == (404, "user_not_found")
             assert profile(table, "no-such-user") == {}
+
+
+class TestAnyOtherRoute:
+    def test_returns_404_route_not_found(self, handler: Handler) -> None:
+        status, body = call(handler, "DELETE /api/v1/admin/users/{id}", params={"id": "u-1"})
+
+        assert (status, body["error"]["code"]) == (404, "route_not_found")
