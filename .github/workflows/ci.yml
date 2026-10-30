@@ -19,13 +19,14 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      # Before the unit tests: one of them bundles the Python Lambdas, which runs uv.
+      - uses: astral-sh/setup-uv@v6
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:unit
       - run: npm run test:integration
       # The Lambdas moved to Python so far.
-      - uses: astral-sh/setup-uv@v6
       - run: uv sync --locked
       - run: uv run ruff check
       - run: uv run ruff format --check
@@ -58,6 +59,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      # cdk bundles the Python Lambdas with uv (lib/python-code.ts).
+      - uses: astral-sh/setup-uv@v6
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
