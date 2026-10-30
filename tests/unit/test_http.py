@@ -1,9 +1,9 @@
 import json
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
-from ledger_api.http import ApiError, Event, Response, require_admin, with_errors
+from ledger_api.http import ApiError, AuthContext, Event, Response, require_admin, with_errors
 
 
 def event(**overrides: Any) -> Event:
@@ -64,3 +64,29 @@ class TestRequireAdmin:
                 require_admin(event(), "admin:read")
 
             assert (raised.value.status, raised.value.code) == (401, "unauthorized")
+
+    class TestGivenACallerWithoutTheAdminRoleOrTheScope:
+        @pytest.mark.parametrize(
+            ("caller", "scope"),
+            [
+                pytest.param(
+                    {"userId": "c-1", "role": "customer", "scope": "admin:read admin:write"},
+                    "admin:read",
+                    id="a customer",
+                ),
+                pytest.param({**ADMIN, "scope": "admin:read"}, "admin:write", id="an admin without the scope"),
+            ],
+        )
+        def test_refuses_with_403_forbidden(
+            self, caller: dict[str, str], scope: Literal["admin:read", "admin:write"]
+        ) -> None:
+            with pytest.raises(ApiError) as raised:
+                require_admin(as_caller(caller), scope)
+
+            assert (raised.value.status, raised.value.code) == (403, "forbidden")
+
+    class TestGivenAnAdminWithTheScope:
+        def test_returns_the_caller(self) -> None:
+            assert require_admin(as_caller(ADMIN), "admin:write") == AuthContext(
+                user_id="admin-1", role="admin", scope="admin:read admin:write"
+            )
