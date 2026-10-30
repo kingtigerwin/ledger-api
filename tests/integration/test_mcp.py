@@ -134,6 +134,13 @@ class TestPostMcp:
             assert tools["delete_transaction"]["annotations"]["destructiveHint"] is True
             assert {"id", "version"} <= set(tools["update_transaction"]["inputSchema"]["required"])
 
+        def test_get_transaction_returns_one_by_id(self, mcp: Handler) -> None:
+            created = payload(call_tool(mcp, customer("mcp-get"), "create_transaction", CAKE))
+
+            fetched = payload(call_tool(mcp, customer("mcp-get"), "get_transaction", {"id": created["id"]}))
+
+            assert fetched == created
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
