@@ -1,12 +1,25 @@
-from typing import cast
+from typing import cast, get_args
 
 from ledger_api.auth.users_store import UsersStore, UserStatus
 from ledger_api.http import ApiError, Event, Handler, Response, json_response, require_admin, with_errors
 
+STATUSES: tuple[UserStatus, ...] = get_args(UserStatus.__value__)
+
 
 def _status_query(event: Event) -> UserStatus:
+    """The `status` query parameter, refused in zod's issue shape (as src/admin/schemas.ts) when it isn't one."""
     query: dict[str, str] = event.get("queryStringParameters") or {}
-    return cast(UserStatus, query.get("status"))
+    status = query.get("status")
+    if status not in STATUSES:
+        expected = "|".join(f'"{s}"' for s in STATUSES)
+        issue = {
+            "code": "invalid_value",
+            "values": list(STATUSES),
+            "path": ["status"],
+            "message": f"Invalid option: expected one of {expected}",
+        }
+        raise ApiError(400, "validation_failed", "Query is invalid", [issue])
+    return cast(UserStatus, status)
 
 
 def create_admin_handler(*, users: UsersStore) -> Handler:
