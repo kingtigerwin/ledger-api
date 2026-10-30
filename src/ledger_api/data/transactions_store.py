@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 
 from ledger_api.data.schemas import NewTransaction, Transaction, TransactionEdit
 
@@ -26,6 +26,19 @@ class TransactionExistsError(Exception):
 def iso_timestamp(at: datetime) -> str:
     """As JavaScript's toISOString() writes it (milliseconds, Z), so old and new rows read and sort the same."""
     return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.") + f"{at.microsecond // 1000:03d}Z"
+
+
+# Sort keys are `<date>#<id>`, so a date range is a key range: from the start of `from` to the end
+# of `to` (the high character sorts after any ID).
+EARLIEST = "0000-01-01"
+LATEST = "9999-12-31"
+
+
+def _range_end(date: str) -> str:
+    return f"{date}#\uffff"
+
+
+type Page = tuple[list[Transaction], dict[str, Any] | None]
 
 
 def _user_pk(user_id: str) -> str:
@@ -189,3 +202,30 @@ class TransactionsStore:
                 {"Delete": {"TableName": name, "Key": _ref_key(user_id, id)}},
             ]
         )
+
+    def list(
+        self,
+        user_id: str,
+        *,
+        date_from: str | None,
+        date_to: str | None,
+        category: str | None,
+        limit: int,
+        start_key: dict[str, Any] | None,
+    ) -> Page:
+        """Newest first: the by-category index if a category is given, otherwise the main key. Dates are a key range."""
+        lower, upper = date_from or EARLIEST, _range_end(date_to or LATEST)
+        query: dict[str, Any] = {"ScanIndexForward": False, "Limit": limit}
+        if category:
+            query["IndexName"] = "byCategory"
+            query["KeyConditionExpression"] = Key("gsi2pk").eq(f"{_user_pk(user_id)}#CATEGORY#{category}") & Key(
+                "gsi2sk"
+            ).between(lower, upper)
+        else:
+            query["KeyConditionExpression"] = Key("pk").eq(_user_pk(user_id)) & Key("sk").between(
+                f"TXN#{lower}", f"TXN#{upper}"
+            )
+        if start_key:
+            query["ExclusiveStartKey"] = start_key
+        res = self._table.query(**query)
+        return [_from_item(item) for item in res.get("Items", [])], res.get("LastEvaluatedKey")

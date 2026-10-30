@@ -62,6 +62,21 @@ class TransactionEdit(TypedDict, total=False):
     note: Note
 
 
+# TypedDict, not a model: "from" is a keyword in Python but a key here.
+ListQuery = TypedDict(
+    "ListQuery",
+    {
+        "from": NotRequired[IsoDate],
+        "to": NotRequired[IsoDate],
+        "category": NotRequired[Category],
+        # Query strings are text, so the page size is read as a number (z.coerce in TypeScript).
+        "limit": NotRequired[Annotated[int, Field(ge=1, le=100)]],
+        "cursor": NotRequired[StrictStr],
+    },
+)
+DEFAULT_LIMIT = 50
+
+
 class Transaction(NewTransaction):
     version: int
     createdAt: str
@@ -70,3 +85,4 @@ class Transaction(NewTransaction):
 
 NEW_TRANSACTION = TypeAdapter(NewTransaction)
 TRANSACTION_EDIT = TypeAdapter(TransactionEdit)
+LIST_QUERY = TypeAdapter(ListQuery)

@@ -73,6 +73,13 @@ def parse_body[T](event: Event, schema: TypeAdapter[T]) -> T:
         raise ApiError(400, "validation_failed", "Request body is invalid", issues(err)) from None
 
 
+def parse_query[T](event: Event, schema: TypeAdapter[T]) -> T:
+    try:
+        return schema.validate_python(event.get("queryStringParameters") or {})
+    except ValidationError as err:
+        raise ApiError(400, "validation_failed", "Query is invalid", issues(err)) from None
+
+
 def json_response(status: int, body: Any) -> Response:
     return {"statusCode": status, "headers": {"content-type": "application/json"}, "body": json.dumps(body)}
 

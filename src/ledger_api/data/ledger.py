@@ -1,7 +1,9 @@
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Any
 
-from ledger_api.data.schemas import NewTransaction, Transaction, TransactionEdit
+from ledger_api.data.cursor import decode_cursor, encode_cursor
+from ledger_api.data.schemas import DEFAULT_LIMIT, ListQuery, NewTransaction, Transaction, TransactionEdit
 from ledger_api.data.transactions_store import TransactionNotFoundError, TransactionsStore, VersionConflictError
 from ledger_api.data.ulid import ulid_time
 from ledger_api.http import ApiError
@@ -54,3 +56,16 @@ class Ledger:
             self._transactions.delete(user_id, id)
         except TransactionNotFoundError:
             raise _not_found() from None
+
+    def list(self, user_id: str, query: ListQuery) -> dict[str, Any]:
+        """One page of the customer's transactions, with a signed cursor for the next page."""
+        cursor = query.get("cursor")
+        items, last_key = self._transactions.list(
+            user_id,
+            date_from=query.get("from"),
+            date_to=query.get("to"),
+            category=query.get("category"),
+            limit=query.get("limit", DEFAULT_LIMIT),
+            start_key=decode_cursor(cursor, self._cursor_secret) if cursor else None,
+        )
+        return {"items": items, "nextCursor": encode_cursor(last_key, self._cursor_secret) if last_key else None}
