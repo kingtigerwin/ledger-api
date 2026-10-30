@@ -6,6 +6,7 @@ import pytest
 from ledger_api.data.handler import create_data_handler
 from ledger_api.data.ledger import Ledger
 from ledger_api.data.transactions_store import TransactionsStore
+from ledger_api.data.ulid import new_ulid
 from ledger_api.http import Handler
 from tests.integration.data import ADMIN, call, customer, expense
 
@@ -142,3 +143,44 @@ class TestAdminEditsACustomersTransaction:
             )
 
             assert status == 403
+
+
+def admin_delete(handler: Handler, user_id: str, id: str, auth: dict[str, str] = ADMIN) -> tuple[int, Any]:
+    route = "DELETE /api/v1/admin/users/{id}/transactions/{transactionId}"
+    return call(handler, route, auth=auth, params={"id": user_id, "transactionId": id})
+
+
+class TestAdminDeletesACustomersTransaction:
+    class TestGivenAnotherCustomersTransaction:
+        def test_deletes_it_and_its_gone_for_the_customer_and_from_the_all_customers_list(
+            self, handler: Handler
+        ) -> None:
+            body = expense(date="2025-03-01")
+            create(handler, customer("del-alice"), body)
+
+            assert admin_delete(handler, "del-alice", body["id"]) == (204, None)
+            assert get_own(handler, customer("del-alice"), body["id"])[0] == 404
+            assert list_all(handler, {"from": "2025-03-01", "to": "2025-03-31"})[1]["items"] == []
+
+    class TestGivenAnUnknownTransaction:
+        def test_returns_404(self, handler: Handler) -> None:
+            status, res = admin_delete(handler, "del-bob", new_ulid())
+
+            assert (status, res["error"]["code"]) == (404, "transaction_not_found")
+
+    class TestGivenACustomer:
+        def test_refuses_with_403_and_leaves_the_transaction_alone(self, handler: Handler) -> None:
+            body = expense()
+            create(handler, customer("del-carol"), body)
+
+            assert admin_delete(handler, "del-carol", body["id"], customer("del-dave"))[0] == 403
+            assert get_own(handler, customer("del-carol"), body["id"])[0] == 200
+
+
+class TestGivenATokenWithoutTheTransactionsWriteScope:
+    def test_refuses_to_record_with_403_forbidden(self, handler: Handler) -> None:
+        reader = {"userId": "reader", "role": "customer", "scope": "transactions:read"}
+
+        status, res = create(handler, reader, expense())
+
+        assert (status, res["error"]["code"]) == (403, "forbidden")
