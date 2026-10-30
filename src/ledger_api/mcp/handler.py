@@ -119,7 +119,7 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             ),
             schema=LIST_QUERY,
             annotations=_READ,
-            run=_not_yet,
+            run=lambda caller, query: ledger.list(caller.user_id, query),
         ),
         _Tool(
             name="get_monthly_summary",
