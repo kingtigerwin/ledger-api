@@ -11,6 +11,7 @@ from ledger_api.data.transactions_store import TransactionsStore
 from ledger_api.data.ulid import is_ulid
 from ledger_api.http import Handler
 from ledger_api.mcp.handler import create_mcp_handler
+from tests.integration.users import seed_user
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
@@ -354,6 +355,61 @@ class TestPostMcp:
                 "to",
                 "username",
             ]
+
+        def test_lists_every_customers_transactions_newest_first_each_with_its_user_id_and_username(
+            self, mcp: Handler, table: "Table"
+        ) -> None:
+            haoran = seed_user(table, "haoran", "active")
+            sisi = seed_user(table, "sisi", "active")
+            record(mcp, customer(haoran["id"]), ("2025-01-02", "groceries", 100))
+            record(mcp, customer(sisi["id"]), ("2025-01-03", "groceries", 200))
+            record(mcp, customer(haoran["id"]), ("2025-01-04", "groceries", 300))
+
+            page = payload(call_tool(mcp, admin("mcp-admin-all"), "list_all_transactions", {}))
+
+            assert [(t["username"], t["amountCents"]) for t in page["items"]] == [
+                ("haoran", 300),
+                ("sisi", 200),
+                ("haoran", 100),
+            ]
+            newest = page["items"][0]
+            assert newest == newest | CAKE | {"userId": haoran["id"], "date": "2025-01-04", "amountCents": 300}
+            assert page["nextCursor"] is None
+
+        def test_pages_and_filters_by_category_like_the_rest_route(self, mcp: Handler, table: "Table") -> None:
+            kim = seed_user(table, "kim", "active")
+            record(
+                mcp,
+                customer(kim["id"]),
+                ("2025-02-01", "groceries", 1),
+                ("2025-02-02", "dining", 2),
+                ("2025-02-03", "groceries", 3),
+            )
+            who = admin("mcp-admin-pages")
+
+            first = payload(call_tool(mcp, who, "list_all_transactions", {"limit": 2}))
+            second = payload(call_tool(mcp, who, "list_all_transactions", {"limit": 2, "cursor": first["nextCursor"]}))
+            groceries = payload(call_tool(mcp, who, "list_all_transactions", {"category": "groceries"}))
+
+            assert amounts(first) == [3, 2]
+            assert amounts(second) == [1]
+            assert second["nextCursor"] is None
+            assert amounts(groceries) == [3, 1]
+            assert second["items"][0]["username"] == "kim"
+
+        def test_gives_a_transaction_whose_user_cant_be_found_a_null_username(self, mcp: Handler) -> None:
+            record(mcp, customer("mcp-admin-no-profile"), ("2025-03-01", "groceries", 1))
+
+            page = payload(call_tool(mcp, admin("mcp-admin-missing"), "list_all_transactions", {}))
+
+            assert [(t["userId"], t["username"]) for t in page["items"]] == [("mcp-admin-no-profile", None)]
+
+        def test_refuses_a_tampered_cursor(self, mcp: Handler) -> None:
+            message = failure(
+                call_tool(mcp, admin("mcp-admin-cursor"), "list_all_transactions", {"cursor": "bad.cursor"})
+            )
+
+            assert "cursor" in message
 
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
