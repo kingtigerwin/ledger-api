@@ -2,6 +2,8 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
+from botocore.exceptions import ClientError
+
 from ledger_api.data.cursor import InvalidCursorError, decode_cursor, encode_cursor
 from ledger_api.data.schemas import DEFAULT_LIMIT, ListQuery, NewTransaction, Transaction, TransactionEdit
 from ledger_api.data.transactions_store import TransactionNotFoundError, TransactionsStore, VersionConflictError
@@ -68,12 +70,19 @@ class Ledger:
             start_key = decode_cursor(cursor, self._cursor_secret) if cursor else None
         except InvalidCursorError:
             raise _invalid_cursor() from None
-        items, last_key = self._transactions.list(
-            user_id,
-            date_from=query.get("from"),
-            date_to=query.get("to"),
-            category=query.get("category"),
-            limit=query.get("limit", DEFAULT_LIMIT),
-            start_key=start_key,
-        )
+        try:
+            items, last_key = self._transactions.list(
+                user_id,
+                date_from=query.get("from"),
+                date_to=query.get("to"),
+                category=query.get("category"),
+                limit=query.get("limit", DEFAULT_LIMIT),
+                start_key=start_key,
+            )
+        except ClientError as err:
+            # A genuine cursor from a different filter has keys this query can't start from. DynamoDB's
+            # client models no ValidationException, so match the code.
+            if start_key and err.response.get("Error", {}).get("Code") == "ValidationException":
+                raise _invalid_cursor() from None
+            raise
         return {"items": items, "nextCursor": encode_cursor(last_key, self._cursor_secret) if last_key else None}
