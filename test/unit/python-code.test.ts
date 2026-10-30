@@ -1,9 +1,11 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { App, Stack } from "aws-cdk-lib";
 import { Certificate } from "aws-cdk-lib/aws-certificatemanager";
 import { beforeAll, describe, expect, it } from "vitest";
 import { LedgerStack } from "../../lib/ledger-stack";
+import { bundleHash } from "../../lib/python-code";
 
 const env = { account: "111111111111", region: "ap-southeast-2" };
 const domain = { domainName: "api.example.cloud", zoneName: "example.cloud", hostedZoneId: "ZEXAMPLE123" };
@@ -13,6 +15,7 @@ type Resources = Record<string, { Type: string; Properties: Record<string, unkno
 describe("given the Python functions' code", () => {
   let files: Map<string, string[]>;
   let assets: Map<string, string>;
+  let keys: Map<string, string>;
 
   beforeAll(() => {
     const app = new App({
@@ -30,6 +33,7 @@ describe("given the Python functions' code", () => {
         .filter(([, r]) => r.Type === "AWS::Lambda::Function" && String(r.Properties.Runtime).startsWith("python"))
         .map(([id, r]) => [id, path.join(assembly.directory, r.Metadata!["aws:asset:path"]!)]),
     );
+    keys = new Map([...assets.keys()].map((id) => [id, JSON.stringify(resources[id]!.Properties.Code)]));
     files = new Map(
       [...assets].map(([id, asset]) => {
         const listed = readdirSync(asset, { recursive: true, withFileTypes: true })
@@ -42,6 +46,12 @@ describe("given the Python functions' code", () => {
 
   it("is built for Notify, Admin, Data and Mcp", () => {
     expect([...files.keys()].map((id) => id.replace(/Function.*/, "")).sort()).toEqual(["Admin", "Data", "Mcp", "Notify"]);
+  });
+
+  it("uploads one bundle for Notify, Admin and Data, and another for Mcp", () => {
+    const key = (name: string) => keys.get([...keys.keys()].find((id) => id.startsWith(name))!);
+    expect(new Set([key("Notify"), key("Admin"), key("Data")]).size).toBe(1);
+    expect(key("Mcp")).not.toEqual(key("Data"));
   });
 
   it("holds the ledger_api package as Python, without the TypeScript beside it", () => {
@@ -91,5 +101,54 @@ describe("given the Python functions' code", () => {
       const hasSdk = listed.some((f) => f.split(path.sep)[0] === "mcp");
       expect([id, hasSdk]).toEqual([id, id.startsWith("Mcp")]);
     }
+  });
+});
+
+describe("given a bundle's hash", () => {
+  // A small project in the shape the bundle is built from, so a test can change it.
+  const project = () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "ledger-api-hash-"));
+    for (const module of ["data", "mcp"]) {
+      mkdirSync(path.join(root, "src", "ledger_api", module), { recursive: true });
+      writeFileSync(path.join(root, "src", "ledger_api", module, "handler.py"), `# ${module}\n`);
+    }
+    cpSync(path.join(__dirname, "..", "..", "pyproject.toml"), path.join(root, "pyproject.toml"));
+    cpSync(path.join(__dirname, "..", "..", "uv.lock"), path.join(root, "uv.lock"));
+    return root;
+  };
+
+  it("changes when a module changes, so the deploy updates the code", () => {
+    const root = project();
+    const before = bundleHash({ withMcp: false, root });
+    appendFileSync(path.join(root, "src", "ledger_api", "data", "handler.py"), "x = 1\n");
+    expect(bundleHash({ withMcp: false, root })).not.toBe(before);
+  });
+
+  it("changes when the locked dependencies change", () => {
+    const root = project();
+    const before = bundleHash({ withMcp: true, root });
+    appendFileSync(path.join(root, "uv.lock"), "\n");
+    expect(bundleHash({ withMcp: true, root })).not.toBe(before);
+  });
+
+  it("differs between the two bundles", () => {
+    const root = project();
+    expect(bundleHash({ withMcp: true, root })).not.toBe(bundleHash({ withMcp: false, root }));
+  });
+
+  it("leaves out ledger_api.mcp for the bundle without it", () => {
+    const root = project();
+    const [lean, withMcp] = [bundleHash({ withMcp: false, root }), bundleHash({ withMcp: true, root })];
+    appendFileSync(path.join(root, "src", "ledger_api", "mcp", "handler.py"), "x = 1\n");
+    expect(bundleHash({ withMcp: false, root })).toBe(lean);
+    expect(bundleHash({ withMcp: true, root })).not.toBe(withMcp);
+  });
+
+  it("ignores bytecode left by local runs", () => {
+    const root = project();
+    const before = bundleHash({ withMcp: false, root });
+    mkdirSync(path.join(root, "src", "ledger_api", "data", "__pycache__"));
+    writeFileSync(path.join(root, "src", "ledger_api", "data", "__pycache__", "handler.cpython-313.pyc"), "stale");
+    expect(bundleHash({ withMcp: false, root })).toBe(before);
   });
 });
