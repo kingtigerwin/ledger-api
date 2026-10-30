@@ -11,6 +11,10 @@ if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
 
 
+class VersionConflictError(Exception):
+    """Someone else changed the transaction since the client read it."""
+
+
 class TransactionExistsError(Exception):
     """The ID was already used: the request is a retry (or a client bug), not a new transaction."""
 
@@ -120,12 +124,15 @@ class TransactionsStore:
         """Applies an edit if its `version` is still current."""
         current = self.get(user_id, id)
         assert current
+        if current["version"] != edit["version"]:
+            raise VersionConflictError(id)
         changes = {k: v for k, v in edit.items() if k != "version"}
         next = cast(
             Transaction, {**current, **changes, "version": current["version"] + 1, "updatedAt": iso_timestamp(now)}
         )
-        self._table.put_item(
-            Item=_to_item(user_id, next),
-            ConditionExpression=Attr("version").eq(edit["version"]),
-        )
+        try:
+            self._table.put_item(Item=_to_item(user_id, next), ConditionExpression=Attr("version").eq(edit["version"]))
+        except self._client.exceptions.ConditionalCheckFailedException:
+            # Changed between our read and this write.
+            raise VersionConflictError(id) from None
         return next
