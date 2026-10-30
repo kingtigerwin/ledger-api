@@ -119,6 +119,21 @@ class TestPostMcp:
 
             assert len(own(ledger, "mcp-twice")) == 2
 
+    class TestGivenACustomersOwnTransactions:
+        READ = ("get_transaction", "list_transactions", "get_monthly_summary")
+        WRITE = ("create_transaction", "update_transaction", "delete_transaction")
+
+        def test_offers_every_transactions_endpoint_marking_reads_read_only_and_delete_destructive(
+            self, mcp: Handler
+        ) -> None:
+            _, body = rpc(mcp, customer("mcp-tools"), "tools/list")
+
+            tools = {tool["name"]: tool for tool in body["result"]["tools"]}
+            assert sorted(tools) == sorted(self.READ + self.WRITE)
+            assert all(tools[name]["annotations"]["readOnlyHint"] for name in self.READ)
+            assert tools["delete_transaction"]["annotations"]["destructiveHint"] is True
+            assert {"id", "version"} <= set(tools["update_transaction"]["inputSchema"]["required"])
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
