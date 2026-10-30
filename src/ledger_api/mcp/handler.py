@@ -13,7 +13,7 @@ from ledger_api.auth.users_store import UsersStore
 from ledger_api.data.ledger import Ledger
 from ledger_api.data.schemas import LIST_QUERY, SUMMARY_QUERY, TRANSACTION_FIELDS, TransactionFields
 from ledger_api.data.ulid import new_ulid
-from ledger_api.http import AuthContext, Event, Handler, Response, auth_context, with_errors
+from ledger_api.http import ApiError, AuthContext, Event, Handler, Response, auth_context, with_errors
 from ledger_api.mcp.schemas import BY_ID, TRANSACTION_CHANGE
 from ledger_api.mcp.transport import serve
 
@@ -170,7 +170,10 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             ctx: ServerRequestContext[Any], params: types.CallToolRequestParams
         ) -> types.CallToolResult:
             tool = next(tool for tool in offered if tool.name == params.name)
-            result = tool.run(caller, tool.schema.validate_python(params.arguments or {}))
+            try:
+                result = tool.run(caller, tool.schema.validate_python(params.arguments or {}))
+            except ApiError as err:
+                return _text(err.message, is_error=True)
             return _text(json.dumps(result, ensure_ascii=False))
 
         return Server("ledger-api", version="1.0.0", on_list_tools=list_tools, on_call_tool=call_tool)
