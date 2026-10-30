@@ -8,7 +8,7 @@ from ledger_api.data.ledger import Ledger
 from ledger_api.data.transactions_store import TransactionsStore
 from ledger_api.data.ulid import new_ulid
 from ledger_api.http import Handler
-from tests.integration.data import call, customer
+from tests.integration.data import ADMIN, call, customer
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
@@ -140,3 +140,20 @@ class TestMonthlySummary:
             status, res = summary(handler, month)
 
             assert (status, res["error"]["code"]) == (400, "validation_failed")
+
+
+def admin_list(handler: Handler, query: dict[str, str], auth: dict[str, str] = ADMIN) -> tuple[int, Any]:
+    return call(handler, "GET /api/v1/admin/users/{id}/transactions", auth=auth, params={"id": HOUSE}, query=query)
+
+
+class TestAdminListsACustomersTransactions:
+    class TestGivenAnAdmin:
+        def test_lists_that_customers_transactions_with_the_same_filters(self, handler: Handler) -> None:
+            status, body = admin_list(handler, {"category": "groceries", "from": "2026-10-01"})
+
+            assert status == 200
+            assert [t["amountCents"] for t in body["items"]] == [6000, 5000, 4000]
+
+    class TestGivenACustomer:
+        def test_refuses_with_403(self, handler: Handler) -> None:
+            assert admin_list(handler, {}, customer("snoop"))[0] == 403
