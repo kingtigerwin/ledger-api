@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AuthContext } from "../../src/auth/authorizer";
 import { createUsersStore } from "../../src/auth/users-store";
-import { createDataHandler } from "../../src/data/handler";
+import { createLedger } from "../../src/data/ledger";
+import { ApiError } from "../../src/http";
 import { isUlid } from "../../src/data/ulid";
 import { createMcpHandler } from "../../src/mcp/handler";
 import { createDataTable, createUsersTable, deleteTable } from "../support/dynamo";
@@ -17,12 +18,12 @@ const customer = (userId: string): AuthContext => ({
 let tableName: string;
 let usersTableName: string;
 let mcp: ReturnType<typeof createMcpHandler>;
-let data: ReturnType<typeof createDataHandler>;
+let ledger: ReturnType<typeof createLedger>;
 
 beforeAll(async () => {
   [tableName, usersTableName] = await Promise.all([createDataTable(), createUsersTable()]);
   mcp = createMcpHandler({ tableName, usersTableName, cursorSecret: "test-cursor-secret", now: () => new Date() });
-  data = createDataHandler({ tableName, cursorSecret: "test-cursor-secret", now: () => new Date() });
+  ledger = createLedger({ tableName, cursorSecret: "test-cursor-secret", now: () => new Date() });
 });
 
 afterAll(async () => {
@@ -64,10 +65,17 @@ const failure = (res: { body: Record<string, any> }): string => {
   return res.body.result.content[0].text;
 };
 
-const getOwn = (userId: string, id: string) =>
-  call(data, "GET /api/v1/transactions/{id}", undefined, { auth: customer(userId), params: { id } });
-const listOwn = (userId: string) =>
-  call(data, "GET /api/v1/transactions", undefined, { auth: customer(userId), query: { from: "2026-10-01" } });
+// What the customer would see over REST, read through the same rules the tools use (src/data/ledger.ts).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getOwn = async (userId: string, id: string): Promise<{ status: number; body: Record<string, any> }> => {
+  try {
+    return { status: 200, body: await ledger.get(userId, id) };
+  } catch (err) {
+    if (err instanceof ApiError) return { status: err.status, body: { error: { code: err.code } } };
+    throw err;
+  }
+};
+const listOwn = async (userId: string) => ({ status: 200, body: await ledger.list(userId, { from: "2026-10-01", limit: 50 }) });
 
 describe("POST /api/mcp", () => {
   describe("given a signed-in customer starting a session", () => {
