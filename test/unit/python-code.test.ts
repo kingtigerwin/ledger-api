@@ -37,8 +37,8 @@ describe("given the Python functions' code", () => {
     );
   }, 120_000);
 
-  it("is built for Notify, Admin and Data", () => {
-    expect([...files.keys()].map((id) => id.replace(/Function.*/, "")).sort()).toEqual(["Admin", "Data", "Notify"]);
+  it("is built for Notify, Admin, Data and Mcp", () => {
+    expect([...files.keys()].map((id) => id.replace(/Function.*/, "")).sort()).toEqual(["Admin", "Data", "Mcp", "Notify"]);
   });
 
   it("holds the ledger_api package as Python source only, without the TypeScript beside it or compiled caches", () => {
@@ -50,10 +50,11 @@ describe("given the Python functions' code", () => {
     }
   });
 
-  it("vendors pydantic for arm64 Linux, and leaves out boto3, which the runtime provides", () => {
+  it("vendors pydantic and the MCP SDK for arm64 Linux, and leaves out boto3, which the runtime provides", () => {
     for (const listed of files.values()) {
       const top = new Set(listed.map((f) => f.split(path.sep)[0]));
       expect(top.has("pydantic")).toBe(true);
+      expect(top.has("mcp")).toBe(true);
       expect(listed.some((f) => /^pydantic_core\/_pydantic_core\..*aarch64-linux-gnu\.so$/.test(f))).toBe(true);
       expect(top.has("boto3") || top.has("botocore")).toBe(false);
     }

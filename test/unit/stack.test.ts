@@ -161,11 +161,18 @@ describe("LedgerStack", () => {
     }
   });
 
-  it("serves MCP behind the authorizer, from a function that can use the Data table", () => {
+  it("serves MCP behind the authorizer, from a Python function that can use the Data table", () => {
     template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "POST /api/mcp", AuthorizationType: "CUSTOM" });
     const [mcpFunction] = Object.entries(template.findResources("AWS::Lambda::Function")).filter(([id]) =>
       id.startsWith("McpFunction"),
     );
+    expect(mcpFunction?.[1].Properties).toMatchObject({
+      Runtime: "python3.13",
+      Handler: "ledger_api.mcp.lambda_function.handler",
+      Architectures: ["arm64"],
+      LoggingConfig: { LogFormat: "JSON" },
+      MemorySize: 256,
+    });
     expect(mcpFunction?.[1].Properties.Environment.Variables).toHaveProperty("DATA_TABLE");
     // It signs list cursors with a key derived from the signing secret, like the Data function.
     const mcpPolicy = Object.entries(template.findResources("AWS::IAM::Policy")).find(([id]) =>
