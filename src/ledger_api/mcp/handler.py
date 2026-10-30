@@ -15,7 +15,7 @@ from ledger_api.data.schemas import LIST_QUERY, SUMMARY_QUERY, TRANSACTION_FIELD
 from ledger_api.data.ulid import new_ulid
 from ledger_api.http import ApiError, AuthContext, Event, Handler, Response, auth_context, issues, with_errors
 from ledger_api.log import log
-from ledger_api.mcp.schemas import BY_ID, TRANSACTION_CHANGE, ById, TransactionChange
+from ledger_api.mcp.schemas import BY_ID, LIST_ALL_QUERY, TRANSACTION_CHANGE, ById, ListAllQuery, TransactionChange
 from ledger_api.mcp.transport import serve
 
 type Scope = Literal["transactions:read", "transactions:write", "admin:read"]
@@ -95,6 +95,9 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
         ledger.remove(caller.user_id, ref["id"])
         return {"id": ref["id"], "deleted": True}
 
+    def list_all_transactions(caller: AuthContext, query: ListAllQuery) -> Any:
+        raise NotImplementedError
+
     tools: list[_Tool[Any]] = [
         _Tool(
             name="create_transaction",
@@ -167,6 +170,22 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             schema=BY_ID,
             annotations=_WRITE.model_copy(update={"destructive_hint": True, "idempotent_hint": True}),
             run=delete_transaction,
+        ),
+        _Tool(
+            name="list_all_transactions",
+            scope="admin:read",
+            title="List every customer's transactions",
+            description=(
+                "Admin only. Every customer's transactions, newest first, as { items, nextCursor }; each item has "
+                "the customer's userId and username (null if the user can't be found). Same filters as "
+                "list_transactions: from and to (YYYY-MM-DD, inclusive), category, limit 1-100 (default 50); "
+                'username limits it to one customer ("show haoran\'s spending"), and fails if there is no such '
+                "user. For the next page, call again with the same filters and cursor set to nextCursor; "
+                "it is null on the last page."
+            ),
+            schema=LIST_ALL_QUERY,
+            annotations=_READ,
+            run=list_all_transactions,
         ),
     ]
 
