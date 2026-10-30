@@ -2,7 +2,8 @@
 
 import json
 from collections.abc import Callable
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from ledger_api.log import log
 
@@ -20,6 +21,19 @@ class ApiError(Exception):
         self.code = code
         self.message = message
         self.details = details
+
+
+@dataclass(frozen=True)
+class AuthContext:
+    """The caller, as the Lambda authorizer passed it in `requestContext.authorizer.lambda`."""
+
+    user_id: str
+    role: str
+    scope: str
+
+
+def require_admin(event: Event, scope: Literal["admin:read", "admin:write"]) -> AuthContext:
+    return AuthContext(user_id="", role="", scope="")
 
 
 def json_response(status: int, body: Any) -> Response:

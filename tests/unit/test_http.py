@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from ledger_api.http import ApiError, Event, Response, with_errors
+from ledger_api.http import ApiError, Event, Response, require_admin, with_errors
 
 
 def event(**overrides: Any) -> Event:
@@ -48,3 +48,19 @@ class TestWithErrors:
                 "routeKey": "GET /api/v1/admin/users",
                 "err": {"name": "RuntimeError", "message": "table users-x is missing"},
             }
+
+
+ADMIN = {"userId": "admin-1", "role": "admin", "scope": "admin:read admin:write"}
+
+
+def as_caller(lambda_context: dict[str, str]) -> Event:
+    return event(requestContext={"authorizer": {"lambda": lambda_context}})
+
+
+class TestRequireAdmin:
+    class TestGivenNoCallerFromTheAuthorizer:
+        def test_refuses_with_401_since_the_route_is_misconfigured(self) -> None:
+            with pytest.raises(ApiError) as raised:
+                require_admin(event(), "admin:read")
+
+            assert (raised.value.status, raised.value.code) == (401, "unauthorized")
