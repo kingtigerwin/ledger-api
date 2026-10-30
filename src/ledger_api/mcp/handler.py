@@ -11,10 +11,10 @@ from pydantic import TypeAdapter
 
 from ledger_api.auth.users_store import UsersStore
 from ledger_api.data.ledger import Ledger
-from ledger_api.data.schemas import LIST_QUERY, SUMMARY_QUERY, TRANSACTION_FIELDS, TransactionFields
+from ledger_api.data.schemas import LIST_QUERY, SUMMARY_QUERY, TRANSACTION_FIELDS, TransactionEdit, TransactionFields
 from ledger_api.data.ulid import new_ulid
 from ledger_api.http import ApiError, AuthContext, Event, Handler, Response, auth_context, with_errors
-from ledger_api.mcp.schemas import BY_ID, TRANSACTION_CHANGE
+from ledger_api.mcp.schemas import BY_ID, TRANSACTION_CHANGE, TransactionChange
 from ledger_api.mcp.transport import serve
 
 type Scope = Literal["transactions:read", "transactions:write", "admin:read"]
@@ -83,6 +83,10 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
         transaction, _ = ledger.record(caller.user_id, {**fields, "id": new_ulid(now()), "currency": "AUD"})
         return transaction
 
+    def update_transaction(caller: AuthContext, change: TransactionChange) -> Any:
+        edit = cast(TransactionEdit, {key: value for key, value in change.items() if key != "id"})
+        return ledger.update(caller.user_id, change["id"], edit)
+
     tools: list[_Tool[Any]] = [
         _Tool(
             name="create_transaction",
@@ -145,7 +149,7 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             ),
             schema=TRANSACTION_CHANGE,
             annotations=_WRITE.model_copy(update={"idempotent_hint": False}),
-            run=_not_yet,
+            run=update_transaction,
         ),
         _Tool(
             name="delete_transaction",
