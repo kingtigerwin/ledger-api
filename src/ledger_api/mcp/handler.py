@@ -14,6 +14,7 @@ from ledger_api.data.ledger import Ledger
 from ledger_api.data.schemas import LIST_QUERY, SUMMARY_QUERY, TRANSACTION_FIELDS, TransactionEdit, TransactionFields
 from ledger_api.data.ulid import new_ulid
 from ledger_api.http import ApiError, AuthContext, Event, Handler, Response, auth_context, issues, with_errors
+from ledger_api.log import log
 from ledger_api.mcp.schemas import BY_ID, TRANSACTION_CHANGE, ById, TransactionChange
 from ledger_api.mcp.transport import serve
 
@@ -190,6 +191,9 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
                 return _text(f"Invalid arguments: {_describe(err)}", is_error=True)
             except ApiError as err:
                 return _text(err.message, is_error=True)
+            except Exception as err:
+                log({"event": "mcp_tool_failed", "tool": tool.name, "err": err}, "error")
+                return _text("Something went wrong; try again", is_error=True)
             return _text(json.dumps(result, ensure_ascii=False))
 
         return Server("ledger-api", version="1.0.0", on_list_tools=list_tools, on_call_tool=call_tool)
