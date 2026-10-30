@@ -177,3 +177,15 @@ class TransactionsStore:
                 },
             ]
         )
+
+    def delete(self, user_id: str, id: str) -> None:
+        current = self.get(user_id, id)
+        if not current:
+            raise TransactionNotFoundError(id)
+        name = self._table.name
+        self._client.transact_write_items(
+            TransactItems=[
+                {"Delete": {"TableName": name, "Key": _main_key(user_id, current["date"], id)}},
+                {"Delete": {"TableName": name, "Key": _ref_key(user_id, id)}},
+            ]
+        )

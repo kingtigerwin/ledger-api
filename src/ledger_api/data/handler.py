@@ -1,6 +1,16 @@
 from ledger_api.data.ledger import Ledger
 from ledger_api.data.schemas import NEW_TRANSACTION, TRANSACTION_EDIT
-from ledger_api.http import ApiError, Event, Handler, Response, auth_context, json_response, parse_body, with_errors
+from ledger_api.http import (
+    ApiError,
+    Event,
+    Handler,
+    Response,
+    auth_context,
+    json_response,
+    no_content,
+    parse_body,
+    with_errors,
+)
 
 
 def _require_scope(event: Event, scope: str) -> str:
@@ -34,6 +44,10 @@ def create_data_handler(*, ledger: Ledger) -> Handler:
                 return json_response(
                     200, ledger.update(user_id, _param(event, "id"), parse_body(event, TRANSACTION_EDIT))
                 )
+            case "DELETE /api/v1/transactions/{id}":
+                user_id = _require_scope(event, "transactions:write")
+                ledger.remove(user_id, _param(event, "id"))
+                return no_content()
             case route:
                 raise ApiError(404, "route_not_found", f"No route for {route}")
 

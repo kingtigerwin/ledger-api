@@ -77,6 +77,10 @@ def json_response(status: int, body: Any) -> Response:
     return {"statusCode": status, "headers": {"content-type": "application/json"}, "body": json.dumps(body)}
 
 
+def no_content() -> Response:
+    return {"statusCode": 204}
+
+
 def with_errors(handler: Handler) -> Handler:
     def wrapped(event: Event) -> Response:
         try:

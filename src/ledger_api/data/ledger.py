@@ -48,3 +48,9 @@ class Ledger:
             raise ApiError(
                 409, "version_conflict", "Someone else changed this transaction; reload it and try again"
             ) from None
+
+    def remove(self, user_id: str, id: str) -> None:
+        try:
+            self._transactions.delete(user_id, id)
+        except TransactionNotFoundError:
+            raise _not_found() from None
