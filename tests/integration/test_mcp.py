@@ -108,6 +108,17 @@ class TestPostMcp:
             assert is_ulid(stored["id"])
             assert own(ledger, "mcp-cake") == [stored]
 
+        def test_keeps_the_expense_out_of_other_customers_ledgers(self, mcp: Handler, ledger: Ledger) -> None:
+            call_tool(mcp, customer("mcp-owner"), "create_transaction", CAKE)
+
+            assert own(ledger, "mcp-someone-else") == []
+
+        def test_records_two_identical_expenses_as_two_transactions(self, mcp: Handler, ledger: Ledger) -> None:
+            call_tool(mcp, customer("mcp-twice"), "create_transaction", CAKE)
+            call_tool(mcp, customer("mcp-twice"), "create_transaction", CAKE)
+
+            assert len(own(ledger, "mcp-twice")) == 2
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
