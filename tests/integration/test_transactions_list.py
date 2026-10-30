@@ -111,3 +111,32 @@ class TestListTransactions:
             status, res = list_transactions(handler, {"category": "groceries", "cursor": first["nextCursor"]})
 
             assert (status, res["error"]["code"]) == (400, "invalid_cursor")
+
+
+def summary(handler: Handler, month: str) -> tuple[int, Any]:
+    return call(handler, "GET /api/v1/transactions/summary", auth=customer(HOUSE), query={"month": month})
+
+
+class TestMonthlySummary:
+    class TestGivenAMonth:
+        def test_totals_that_months_spending_by_category_largest_first(self, handler: Handler) -> None:
+            assert summary(handler, "2026-10") == (
+                200,
+                {
+                    "month": "2026-10",
+                    "currency": "AUD",
+                    "totalCents": 14000,
+                    "byCategory": [
+                        {"category": "groceries", "totalCents": 9000},
+                        {"category": "dining", "totalCents": 3000},
+                        {"category": "transport", "totalCents": 2000},
+                    ],
+                },
+            )
+
+    class TestGivenAMalformedMonth:
+        @pytest.mark.parametrize("month", ["2026-13", "2026-1", "202610", "2026-10\n"])
+        def test_rejects_it_with_400(self, handler: Handler, month: str) -> None:
+            status, res = summary(handler, month)
+
+            assert (status, res["error"]["code"]) == (400, "validation_failed")
