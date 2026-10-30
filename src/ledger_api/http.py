@@ -37,7 +37,9 @@ def auth_context(event: Event) -> AuthContext:
     Every protected route is behind the authorizer, so a missing caller means a misconfigured
     route; refuse rather than serve anonymously.
     """
-    ctx = (event.get("requestContext") or {}).get("authorizer", {}).get("lambda") or {}
+    request_context: dict[str, Any] = event.get("requestContext") or {}
+    authorizer: dict[str, Any] = request_context.get("authorizer") or {}
+    ctx: dict[str, Any] = authorizer.get("lambda") or {}
     if not ctx.get("userId"):
         raise ApiError(401, "unauthorized", "Sign in first")
     return AuthContext(user_id=str(ctx["userId"]), role=str(ctx.get("role", "")), scope=str(ctx.get("scope", "")))
