@@ -165,7 +165,7 @@ export class LedgerStack extends Stack {
 
     // MCP tools for agents: the Transactions routes again, acting as the caller. The signing secret is for list cursors;
     // the Users table, read-only, is for the usernames on the admin's cross-customer list.
-    const mcpFunction = makeFunction("Mcp", "mcp/lambda.ts", {
+    const mcpFunction = makePythonFunction("Mcp", "mcp", {
       memorySize: 256,
       environment: { DATA_TABLE: dataTable.tableName, USERS_TABLE: usersTable.tableName },
     });
