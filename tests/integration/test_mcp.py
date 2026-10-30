@@ -411,6 +411,63 @@ class TestPostMcp:
 
             assert "cursor" in message
 
+        class TestFilteringByUsername:
+            def test_lists_only_that_customers_transactions_paging_and_filtering_as_usual(
+                self, mcp: Handler, table: "Table"
+            ) -> None:
+                haoran = seed_user(table, "haoran", "active")
+                sisi = seed_user(table, "sisi", "active")
+                record(mcp, customer(haoran["id"]), ("2025-04-01", "groceries", 1))
+                record(mcp, customer(sisi["id"]), ("2025-04-02", "groceries", 2))
+                record(mcp, customer(haoran["id"]), ("2025-04-03", "dining", 3), ("2025-04-04", "groceries", 4))
+                who = admin("mcp-admin-by-name")
+                query = {"username": "haoran", "from": "2025-04-01"}
+
+                first = payload(call_tool(mcp, who, "list_all_transactions", query | {"limit": 2}))
+                second = payload(
+                    call_tool(mcp, who, "list_all_transactions", query | {"limit": 2, "cursor": first["nextCursor"]})
+                )
+                groceries = payload(call_tool(mcp, who, "list_all_transactions", query | {"category": "groceries"}))
+
+                assert amounts(first) == [4, 3]
+                assert amounts(second) == [1]
+                assert second["nextCursor"] is None
+                assert amounts(groceries) == [4, 1]
+                newest = first["items"][0]
+                assert newest == newest | {"userId": haoran["id"], "username": "haoran", "date": "2025-04-04"}
+
+            def test_matches_the_username_in_any_case(self, mcp: Handler, table: "Table") -> None:
+                kim = seed_user(table, "kim", "active")
+                record(mcp, customer(kim["id"]), ("2025-04-15", "groceries", 15))
+                record(mcp, customer(seed_user(table, "lee", "active")["id"]), ("2025-04-16", "groceries", 16))
+
+                page = payload(call_tool(mcp, admin("mcp-admin-case"), "list_all_transactions", {"username": "KIM"}))
+
+                assert [(t["userId"], t["username"], t["amountCents"]) for t in page["items"]] == [
+                    (kim["id"], "kim", 15)
+                ]
+
+            def test_reports_an_unknown_username_as_an_error_not_as_no_spending(self, mcp: Handler) -> None:
+                who = admin("mcp-admin-nobody")
+
+                message = failure(call_tool(mcp, who, "list_all_transactions", {"username": "nobody"}))
+
+                assert "no such user" in message.lower()
+
+            def test_refuses_a_cursor_from_the_unfiltered_list(self, mcp: Handler, table: "Table") -> None:
+                lee = seed_user(table, "lee", "active")
+                record(mcp, customer(lee["id"]), ("2025-04-20", "groceries", 1), ("2025-04-21", "groceries", 2))
+                who = admin("mcp-admin-mixed-cursor")
+                unfiltered = payload(call_tool(mcp, who, "list_all_transactions", {"limit": 1}))
+
+                message = failure(
+                    call_tool(
+                        mcp, who, "list_all_transactions", {"username": "lee", "cursor": unfiltered["nextCursor"]}
+                    )
+                )
+
+                assert "cursor" in message
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
