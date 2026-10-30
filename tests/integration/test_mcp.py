@@ -468,6 +468,31 @@ class TestPostMcp:
 
                 assert "cursor" in message
 
+    class TestGivenACustomerTokenEvenOneCarryingAdminRead:
+        @pytest.mark.parametrize(
+            "auth",
+            [
+                pytest.param(customer("mcp-not-admin"), id="customer"),
+                pytest.param(
+                    {"userId": "mcp-pretender", "role": "customer", "scope": "admin:read transactions:read"},
+                    id="customer with admin:read",
+                ),
+            ],
+        )
+        def test_hides_list_all_transactions_and_refuses_to_call_it(self, mcp: Handler, auth: dict[str, str]) -> None:
+            _, body = rpc(mcp, auth, "tools/list")
+
+            assert "list_all_transactions" not in [t["name"] for t in body["result"]["tools"]]
+            failure(call_tool(mcp, auth, "list_all_transactions", {}))
+
+    class TestGivenAnAdminTokenWithoutAdminRead:
+        def test_hides_list_all_transactions(self, mcp: Handler) -> None:
+            _, body = rpc(
+                mcp, {"userId": "mcp-admin-tx-only", "role": "admin", "scope": "transactions:read"}, "tools/list"
+            )
+
+            assert "list_all_transactions" not in [t["name"] for t in body["result"]["tools"]]
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
