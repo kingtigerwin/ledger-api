@@ -69,6 +69,10 @@ class UsersStore:
             scan["ExclusiveStartKey"] = page["LastEvaluatedKey"]
         return sorted(users, key=lambda user: user.created_at)
 
+    def get_by_id(self, user_id: str) -> User | None:
+        item = self._table.get_item(Key=_profile_key(user_id), ConsistentRead=True).get("Item")
+        return _user(item) if item else None
+
     def set_status(self, user_id: str, status: UserStatus) -> User:
         """Raises UserNotFoundError rather than creating a profile for an unknown ID."""
         try:

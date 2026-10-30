@@ -47,6 +47,11 @@ def create_admin_handler(*, users: UsersStore) -> Handler:
                 return json_response(200, _set_status(event, "active").as_json())
             case "POST /api/v1/admin/users/{id}/disable":
                 require_admin(event, "admin:write")
+                target = users.get_by_id(_user_id(event))
+                if not target:
+                    raise ApiError(404, "user_not_found", "No such user")
+                if target.role == "admin":
+                    raise ApiError(409, "cannot_disable_admin", "Admins can't be disabled")
                 user = _set_status(event, "disabled")
                 # Their access token still works until it expires (at most 15 minutes); refreshing ends now.
                 users.revoke_refresh_tokens(user.id)
