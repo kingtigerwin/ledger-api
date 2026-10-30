@@ -14,7 +14,7 @@ from ledger_api.data.ledger import Ledger
 from ledger_api.data.schemas import LIST_QUERY, SUMMARY_QUERY, TRANSACTION_FIELDS, TransactionEdit, TransactionFields
 from ledger_api.data.ulid import new_ulid
 from ledger_api.http import ApiError, AuthContext, Event, Handler, Response, auth_context, with_errors
-from ledger_api.mcp.schemas import BY_ID, TRANSACTION_CHANGE, TransactionChange
+from ledger_api.mcp.schemas import BY_ID, TRANSACTION_CHANGE, ById, TransactionChange
 from ledger_api.mcp.transport import serve
 
 type Scope = Literal["transactions:read", "transactions:write", "admin:read"]
@@ -64,10 +64,6 @@ def _inline(schema: dict[str, Any]) -> dict[str, Any]:
     return {key: resolve(value) for key, value in schema.items() if key not in ("title", "description")}
 
 
-def _not_yet(caller: AuthContext, input: Any) -> Any:
-    raise NotImplementedError
-
-
 def _text(text: str, *, is_error: bool = False) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=is_error)
 
@@ -86,6 +82,10 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
     def update_transaction(caller: AuthContext, change: TransactionChange) -> Any:
         edit = cast(TransactionEdit, {key: value for key, value in change.items() if key != "id"})
         return ledger.update(caller.user_id, change["id"], edit)
+
+    def delete_transaction(caller: AuthContext, ref: ById) -> Any:
+        ledger.remove(caller.user_id, ref["id"])
+        return {"id": ref["id"], "deleted": True}
 
     tools: list[_Tool[Any]] = [
         _Tool(
@@ -109,7 +109,7 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             description="One of the signed-in customer's transactions, by id, including its current version.",
             schema=BY_ID,
             annotations=_READ,
-            run=lambda caller, input: ledger.get(caller.user_id, input["id"]),
+            run=lambda caller, ref: ledger.get(caller.user_id, ref["id"]),
         ),
         _Tool(
             name="list_transactions",
@@ -158,7 +158,7 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             description="Permanently deletes one of the signed-in customer's transactions, by id.",
             schema=BY_ID,
             annotations=_WRITE.model_copy(update={"destructive_hint": True, "idempotent_hint": True}),
-            run=_not_yet,
+            run=delete_transaction,
         ),
     ]
 
