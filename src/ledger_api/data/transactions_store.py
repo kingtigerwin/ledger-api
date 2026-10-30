@@ -1,5 +1,6 @@
 """The Data table's transactions, as src/data/transactions-store.ts reads and writes them (src/data/data-table.ts)."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -38,7 +39,23 @@ def _range_end(date: str) -> str:
     return f"{date}#\uffff"
 
 
-type Page = tuple[list[Transaction], dict[str, Any] | None]
+type Page[T] = tuple[list[T], dict[str, Any] | None]
+
+
+@dataclass(frozen=True)
+class ListRange:
+    """Which transactions a list asks for, and how many per page."""
+
+    date_from: str | None
+    date_to: str | None
+    category: str | None
+    limit: int
+
+
+class OwnedTransaction(Transaction):
+    """A transaction in the admin's all-customers list, with whose it is."""
+
+    userId: str
 
 
 def _user_pk(user_id: str) -> str:
@@ -203,22 +220,13 @@ class TransactionsStore:
             ]
         )
 
-    def list(
-        self,
-        user_id: str,
-        *,
-        date_from: str | None,
-        date_to: str | None,
-        category: str | None,
-        limit: int,
-        start_key: dict[str, Any] | None,
-    ) -> Page:
+    def list(self, user_id: str, span: ListRange, start_key: dict[str, Any] | None) -> Page[Transaction]:
         """Newest first: the by-category index if a category is given, otherwise the main key. Dates are a key range."""
-        lower, upper = date_from or EARLIEST, _range_end(date_to or LATEST)
-        query: dict[str, Any] = {"ScanIndexForward": False, "Limit": limit}
-        if category:
+        lower, upper = span.date_from or EARLIEST, _range_end(span.date_to or LATEST)
+        query: dict[str, Any] = {"ScanIndexForward": False, "Limit": span.limit}
+        if span.category:
             query["IndexName"] = "byCategory"
-            query["KeyConditionExpression"] = Key("gsi2pk").eq(f"{_user_pk(user_id)}#CATEGORY#{category}") & Key(
+            query["KeyConditionExpression"] = Key("gsi2pk").eq(f"{_user_pk(user_id)}#CATEGORY#{span.category}") & Key(
                 "gsi2sk"
             ).between(lower, upper)
         else:
@@ -229,3 +237,21 @@ class TransactionsStore:
             query["ExclusiveStartKey"] = start_key
         res = self._table.query(**query)
         return [_from_item(item) for item in res.get("Items", [])], res.get("LastEvaluatedKey")
+
+    def list_all(self, span: ListRange, start_key: dict[str, Any] | None) -> Page[OwnedTransaction]:
+        """Every customer's transactions, newest first, each with its owner's userId (for the admin)."""
+        query: dict[str, Any] = {
+            "IndexName": "allByDate",
+            "KeyConditionExpression": Key("gsi3pk").eq("TXN")
+            & Key("gsi3sk").between(span.date_from or EARLIEST, _range_end(span.date_to or LATEST)),
+            "ScanIndexForward": False,
+            "Limit": span.limit,
+        }
+        if span.category:
+            query["FilterExpression"] = Attr("category").eq(span.category)
+        if start_key:
+            query["ExclusiveStartKey"] = start_key
+        res = self._table.query(**query)
+        owner = len(_user_pk(""))
+        items = [OwnedTransaction(**_from_item(item), userId=str(item["pk"])[owner:]) for item in res.get("Items", [])]
+        return items, res.get("LastEvaluatedKey")

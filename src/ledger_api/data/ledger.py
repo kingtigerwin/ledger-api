@@ -6,7 +6,13 @@ from botocore.exceptions import ClientError
 
 from ledger_api.data.cursor import InvalidCursorError, decode_cursor, encode_cursor
 from ledger_api.data.schemas import DEFAULT_LIMIT, ListQuery, NewTransaction, Transaction, TransactionEdit
-from ledger_api.data.transactions_store import TransactionNotFoundError, TransactionsStore, VersionConflictError
+from ledger_api.data.transactions_store import (
+    ListRange,
+    Page,
+    TransactionNotFoundError,
+    TransactionsStore,
+    VersionConflictError,
+)
 from ledger_api.data.ulid import ulid_time
 from ledger_api.http import ApiError
 
@@ -63,22 +69,23 @@ class Ledger:
         except TransactionNotFoundError:
             raise _not_found() from None
 
-    def list(self, user_id: str, query: ListQuery) -> dict[str, Any]:
-        """One page of the customer's transactions, with a signed cursor for the next page."""
+    def _page[T](
+        self, query: ListQuery, lister: Callable[[ListRange, dict[str, Any] | None], Page[T]]
+    ) -> dict[str, Any]:
+        """One page from `lister` (one customer's transactions, or everyone's), with a signed next-page cursor."""
         cursor = query.get("cursor")
         try:
             start_key = decode_cursor(cursor, self._cursor_secret) if cursor else None
         except InvalidCursorError:
             raise _invalid_cursor() from None
+        span = ListRange(
+            date_from=query.get("from"),
+            date_to=query.get("to"),
+            category=query.get("category"),
+            limit=query.get("limit", DEFAULT_LIMIT),
+        )
         try:
-            items, last_key = self._transactions.list(
-                user_id,
-                date_from=query.get("from"),
-                date_to=query.get("to"),
-                category=query.get("category"),
-                limit=query.get("limit", DEFAULT_LIMIT),
-                start_key=start_key,
-            )
+            items, last_key = lister(span, start_key)
         except ClientError as err:
             # A genuine cursor from a different filter has keys this query can't start from. DynamoDB's
             # client models no ValidationException, so match the code.
@@ -86,6 +93,14 @@ class Ledger:
                 raise _invalid_cursor() from None
             raise
         return {"items": items, "nextCursor": encode_cursor(last_key, self._cursor_secret) if last_key else None}
+
+    def list(self, user_id: str, query: ListQuery) -> dict[str, Any]:
+        """One page of the customer's transactions."""
+        return self._page(query, lambda span, start_key: self._transactions.list(user_id, span, start_key))
+
+    def list_all(self, query: ListQuery) -> dict[str, Any]:
+        """One page of every customer's transactions, for the admin."""
+        return self._page(query, self._transactions.list_all)
 
     def summary(self, user_id: str, month: str) -> dict[str, Any]:
         """
@@ -96,9 +111,8 @@ class Ledger:
         start_key: dict[str, Any] | None = None
         while True:
             # Day 31 is a safe upper bound for every month: sort keys compare as strings.
-            items, start_key = self._transactions.list(
-                user_id, date_from=f"{month}-01", date_to=f"{month}-31", category=None, limit=100, start_key=start_key
-            )
+            span = ListRange(date_from=f"{month}-01", date_to=f"{month}-31", category=None, limit=100)
+            items, start_key = self._transactions.list(user_id, span, start_key)
             for t in items:
                 by_category[t["category"]] = by_category.get(t["category"], 0) + t["amountCents"]
             if not start_key:
