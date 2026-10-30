@@ -7,13 +7,13 @@ from typing import Any, Literal, cast
 import mcp_types as types
 from mcp.server.context import ServerRequestContext
 from mcp.server.lowlevel import Server
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from ledger_api.auth.users_store import UsersStore
 from ledger_api.data.ledger import Ledger
 from ledger_api.data.schemas import LIST_QUERY, SUMMARY_QUERY, TRANSACTION_FIELDS, TransactionEdit, TransactionFields
 from ledger_api.data.ulid import new_ulid
-from ledger_api.http import ApiError, AuthContext, Event, Handler, Response, auth_context, with_errors
+from ledger_api.http import ApiError, AuthContext, Event, Handler, Response, auth_context, issues, with_errors
 from ledger_api.mcp.schemas import BY_ID, TRANSACTION_CHANGE, ById, TransactionChange
 from ledger_api.mcp.transport import serve
 
@@ -62,6 +62,13 @@ def _inline(schema: dict[str, Any]) -> dict[str, Any]:
         return node
 
     return {key: resolve(value) for key, value in schema.items() if key not in ("title", "description")}
+
+
+def _describe(err: ValidationError) -> str:
+    """Each problem as `field: message`, which an agent can act on."""
+    return "; ".join(
+        f"{'.'.join(map(str, issue['path'])) or '(arguments)'}: {issue['message']}" for issue in issues(err)
+    )
 
 
 def _text(text: str, *, is_error: bool = False) -> types.CallToolResult:
@@ -176,6 +183,8 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             tool = next(tool for tool in offered if tool.name == params.name)
             try:
                 result = tool.run(caller, tool.schema.validate_python(params.arguments or {}))
+            except ValidationError as err:
+                return _text(f"Invalid arguments: {_describe(err)}", is_error=True)
             except ApiError as err:
                 return _text(err.message, is_error=True)
             return _text(json.dumps(result, ensure_ascii=False))
