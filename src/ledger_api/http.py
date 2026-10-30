@@ -44,7 +44,11 @@ def auth_context(event: Event) -> AuthContext:
 
 
 def require_admin(event: Event, scope: Literal["admin:read", "admin:write"]) -> AuthContext:
-    return auth_context(event)
+    """Admin routes need both the admin role and the scope for the kind of access."""
+    ctx = auth_context(event)
+    if ctx.role != "admin" or scope not in ctx.scope.split(" "):
+        raise ApiError(403, "forbidden", "Admins only")
+    return ctx
 
 
 def json_response(status: int, body: Any) -> Response:
