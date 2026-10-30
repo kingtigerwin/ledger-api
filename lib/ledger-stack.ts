@@ -100,10 +100,10 @@ export class LedgerStack extends Stack {
       });
       return fn;
     };
-    // The Lambdas moving to Python, all from one bundle (lib/python-code.ts).
+    // The Lambdas moving to Python, from one bundle, or for MCP one with the SDK too (lib/python-code.ts).
     const makePythonFunction = (name: string, module: string, props: Partial<FunctionProps> = {}) =>
       new LambdaFunction(this, `${name}Function`, {
-        code: pythonCode(),
+        code: pythonCode({ withMcp: module === "mcp" }),
         handler: `ledger_api.${module}.lambda_function.handler`,
         runtime: Runtime.PYTHON_3_13,
         architecture: Architecture.ARM_64,
@@ -166,7 +166,8 @@ export class LedgerStack extends Stack {
     // MCP tools for agents: the Transactions routes again, acting as the caller. The signing secret is for list cursors;
     // the Users table, read-only, is for the usernames on the admin's cross-customer list.
     const mcpFunction = makePythonFunction("Mcp", "mcp", {
-      memorySize: 256,
+      // Lambda's CPU scales with memory, and a cold start spends most of its time importing the MCP SDK.
+      memorySize: 512,
       environment: { DATA_TABLE: dataTable.tableName, USERS_TABLE: usersTable.tableName },
     });
     dataTable.grantReadWriteData(mcpFunction);

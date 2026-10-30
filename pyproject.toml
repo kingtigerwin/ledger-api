@@ -6,7 +6,6 @@ requires-python = ">=3.13"
 # boto3 comes with the Lambda runtime; the rest is bundled for arm64 Linux at synth (lib/python-code.ts).
 dependencies = [
     "boto3>=1.43.119",
-    "mcp>=2.3.0",
     "pydantic>=2.14.1",
 ]
 
@@ -15,7 +14,10 @@ requires = ["uv_build>=0.13.6,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+# Only the MCP function's bundle carries the SDK: it is most of the bundle's size, and so of every cold start.
+mcp = ["mcp>=2.3.0"]
 dev = [
+    { include-group = "mcp" },
     "boto3-stubs[dynamodb,dynamodbstreams,sesv2,ssm]>=1.43.119",
     "pyright>=1.1.414",
     "pytest>=9.1.1",

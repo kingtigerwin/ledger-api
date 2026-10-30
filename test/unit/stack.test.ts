@@ -171,7 +171,7 @@ describe("LedgerStack", () => {
       Handler: "ledger_api.mcp.lambda_function.handler",
       Architectures: ["arm64"],
       LoggingConfig: { LogFormat: "JSON" },
-      MemorySize: 256,
+      MemorySize: 512,
     });
     expect(mcpFunction?.[1].Properties.Environment.Variables).toHaveProperty("DATA_TABLE");
     // It signs list cursors with a key derived from the signing secret, like the Data function.
