@@ -31,8 +31,11 @@ def mcp(ledger: Ledger, table: "Table") -> Handler:
 
 _ids = itertools.count(1)
 
+# The HTTP status and the JSON body.
+type Reply = tuple[int, Any]
 
-def rpc(mcp: Handler, auth: dict[str, str] | None, method: str, params: dict[str, Any] | None = None) -> tuple[int, Any]:
+
+def rpc(mcp: Handler, auth: dict[str, str] | None, method: str, params: dict[str, Any] | None = None) -> Reply:
     """Sends one JSON-RPC request to POST /api/mcp, as an MCP client over Streamable HTTP would."""
     res = mcp(
         {
