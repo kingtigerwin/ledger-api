@@ -15,7 +15,7 @@ npx vitest run -t "given a pending user"             # tests matching a name
 npm run synth                 # cdk synth (both stacks)
 API_URL=... SMOKE_TEST_PASSWORD=... npm run smoke   # round trip against a deployed API
 
-# Python (3.13, managed with uv): the Lambdas moved over from TypeScript so far, now `notify`
+# Python (3.13, managed with uv): the Lambdas moved over from TypeScript so far, now `notify` and `admin`
 uv sync                       # install into .venv
 uv run pytest                 # unit and integration tests (integration needs DynamoDB Local too)
 uv run pytest tests/unit      # one folder
@@ -30,11 +30,11 @@ Deploys: `LedgerApi` is deployed by the `deploy` job in `.github/workflows/ci.ym
 CDK stacks (`bin/app.ts`): `LedgerApi` (`lib/ledger-stack.ts`, the app), `LedgerApiCertificate` (`lib/certificate-stack.ts`, the custom domain's ACM certificate in us-east-1, only when `customDomain` is set in `cdk.json`) and `LedgerApiCiAccess` (`lib/ci-access-stack.ts`, GitHub OIDC deploy role). CloudFront → HTTP API → one Lambda per area, each a thin `lambda.ts` that wires real dependencies into a testable `create…Handler(deps)` in `handler.ts`:
 
 - `src/auth/`: register, login, refresh, logout, me (Users table); `authorizer-lambda.ts` validates the bearer JWT for every protected route and passes `userId`, `role`, `scope` in the request context.
-- `src/admin/`: list, enable, disable users. `src/data/`: transactions, plus the admin's `/admin/...` routes to view, edit and delete any customer's transactions.
+- `src/ledger_api/admin/` (Python): list, enable, disable users, through `src/ledger_api/auth/users_store.py`, the Python side of the users store (only what admin needs; `src/auth/users-store.ts` still serves auth, so keep the two writing the same item shapes). `src/admin/schemas.ts` stays for the OpenAPI spec. `src/data/`: transactions, plus the admin's `/admin/...` routes to view, edit and delete any customer's transactions.
 - `src/mcp/`: `POST /api/mcp`, MCP over stateless Streamable HTTP for agents. Behind the same authorizer; a fresh `McpServer` per request holds the caller's tools, one per Transactions route, plus the admin's read-only `list_all_transactions` (with usernames from the Users table). `src/data/ledger.ts` holds the transaction rules and errors that both the REST handler and the MCP tools call, so add behaviour there, not in either front door.
 - `src/ledger_api/notify/` (Python): emails customers on sign-up and first approval, and the admin (`ADMIN_EMAIL`) on each sign-up to approve or reject, linking to ledger-ui's admin page. The Users table's stream (only with `emailFrom` in `cdk.json`) drives it; `emails.py` decides which email a change calls for, and it sends through SES. Same split as the TypeScript Lambdas: `lambda_function.py` wires boto3 into `create_notify_handler(...)` in `handler.py`.
 - `src/bootstrap/`: custom resource that creates the SSM secrets and the `sisi` admin on deploy, never overwriting. `src/docs/`: serves `/api/openapi.json`.
-- `src/ledger_api/log.py` is the Python twin of `src/log.ts`: the same JSON lines, with the same keys redacted.
+- `src/ledger_api/log.py` is the Python twin of `src/log.ts`: the same JSON lines, with the same keys redacted. `src/ledger_api/http.py` is the twin of `src/http.ts` (`with_errors`, `ApiError`, `require_admin`), and `src/ledger_api/db.py` of `src/db-client.ts`.
 - `src/http.ts` holds the shared handler plumbing (`withErrors`, `ApiError` → `{ error: { code, message } }`, `parseBody`, `requireAdmin`).
 
 Two tables, both keyed `pk`/`sk`: Users (users, username claims, refresh-token hashes, lockouts) and Data (`USER#<userId>` partition holding `TXN#<date>#<id>` items plus `TXNREF#<id>` pointers; indexes `byCategory` on `gsi2pk`/`gsi2sk` and `allByDate` on `gsi3pk`/`gsi3sk` for the admin's cross-customer list). `src/data/data-table.ts` and `src/auth/users-table.ts` define the keys for both the stack and `test/support/dynamo.ts`.

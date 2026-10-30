@@ -17,7 +17,7 @@ import { Alarm, ComparisonOperator, Metric, TreatMissingData } from "aws-cdk-lib
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { AttributeType, Billing, StreamViewType, TableV2 } from "aws-cdk-lib/aws-dynamodb";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
-import { Architecture, Code, FilterCriteria, FilterRule, Function as LambdaFunction, LoggingFormat, Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
+import { Architecture, Code, FilterCriteria, FilterRule, Function as LambdaFunction, type FunctionProps, LoggingFormat, Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
 import { DynamoEventSource, SqsDlq } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction, type NodejsFunctionProps } from "aws-cdk-lib/aws-lambda-nodejs";
 import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from "aws-cdk-lib/aws-logs";
@@ -99,6 +99,21 @@ export class LedgerStack extends Stack {
       });
       return fn;
     };
+    // The Lambdas moving to Python. boto3 comes with the runtime, so the code is the ledger_api
+    // package as it stands, with nothing to bundle.
+    const makePythonFunction = (name: string, module: string, props: Partial<FunctionProps> = {}) =>
+      new LambdaFunction(this, `${name}Function`, {
+        code: Code.fromAsset(path.join(__dirname, "../src"), {
+          exclude: ["*", "!ledger_api", "!ledger_api/**", "**/__pycache__"],
+        }),
+        handler: `ledger_api.${module}.lambda_function.handler`,
+        runtime: Runtime.PYTHON_3_13,
+        architecture: Architecture.ARM_64,
+        timeout: Duration.seconds(10),
+        loggingFormat: LoggingFormat.JSON,
+        logGroup: new LogGroup(this, `${name}Logs`, { retention: RetentionDays.TWO_WEEKS }),
+        ...props,
+      });
     const canReadSigningSecret = (fn: NodejsFunction) =>
       fn.addToRolePolicy(
         new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [parameterArn(SIGNING_SECRET_PARAM)] }),
@@ -137,7 +152,7 @@ export class LedgerStack extends Stack {
       serviceToken: new Provider(this, "BootstrapProvider", { onEventHandler: bootstrapFunction }).serviceToken,
     });
 
-    const adminFunction = makeFunction("Admin", "admin/lambda.ts", {
+    const adminFunction = makePythonFunction("Admin", "admin", {
       memorySize: 256,
       environment: { USERS_TABLE: usersTable.tableName },
     });
@@ -301,18 +316,7 @@ export class LedgerStack extends Stack {
         identity: Identity.publicHostedZone(zone),
         configurationSet,
       });
-      // Python, moving over from TypeScript one Lambda at a time. boto3 comes with the runtime, so the
-      // code is the ledger_api package as it stands, with nothing to bundle.
-      const notifyFunction = new LambdaFunction(this, "NotifyFunction", {
-        code: Code.fromAsset(path.join(__dirname, "../src"), {
-          exclude: ["*", "!ledger_api", "!ledger_api/**", "**/__pycache__"],
-        }),
-        handler: "ledger_api.notify.lambda_function.handler",
-        runtime: Runtime.PYTHON_3_13,
-        architecture: Architecture.ARM_64,
-        timeout: Duration.seconds(10),
-        loggingFormat: LoggingFormat.JSON,
-        logGroup: new LogGroup(this, "NotifyLogs", { retention: RetentionDays.TWO_WEEKS }),
+      const notifyFunction = makePythonFunction("Notify", "notify", {
         memorySize: 128,
         environment: {
           EMAIL_FROM: emailFrom,

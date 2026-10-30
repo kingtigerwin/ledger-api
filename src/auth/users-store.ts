@@ -7,8 +7,6 @@ import {
   PutCommand,
   QueryCommand,
   type QueryCommandOutput,
-  ScanCommand,
-  type ScanCommandOutput,
   TransactWriteCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
@@ -141,31 +139,6 @@ export function createUsersStore(tableName: string) {
           }),
         );
       }
-    },
-
-    /**
-     * Scans the whole table. Fine at household-app scale (an admin listing a few sign-ups);
-     * a status index would be the upgrade if the table grows large.
-     */
-    async listByStatus(status: UserStatus): Promise<User[]> {
-      const users: User[] = [];
-      let startKey: Record<string, unknown> | undefined;
-      do {
-        const page: ScanCommandOutput = await ddb.send(
-          new ScanCommand({
-            TableName: tableName,
-            FilterExpression: "sk = :profile AND #status = :status",
-            ExpressionAttributeNames: { "#status": "status" },
-            ExpressionAttributeValues: { ":profile": "PROFILE", ":status": status },
-            ExclusiveStartKey: startKey,
-          }),
-        );
-        for (const { id, username, email, role, status, createdAt } of page.Items ?? []) {
-          users.push({ id, username, email, role, status, createdAt });
-        }
-        startKey = page.LastEvaluatedKey;
-      } while (startKey);
-      return users.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     },
 
     async getById(userId: string): Promise<User | undefined> {

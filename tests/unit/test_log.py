@@ -28,16 +28,18 @@ class TestRedact:
 
 
 class TestLog:
-    def test_writes_one_json_line_to_stdout_for_info(self, capsys: pytest.CaptureFixture[str]) -> None:
-        log({"event": "email_sent", "email": "haoran@example.com"})
+    class TestGivenAnInfoEntry:
+        def test_writes_it_redacted_as_one_json_line_to_stdout(self, capsys: pytest.CaptureFixture[str]) -> None:
+            log({"event": "email_sent", "email": "haoran@example.com"})
 
-        out, err = capsys.readouterr()
-        assert json.loads(out) == {"event": "email_sent", "email": "[REDACTED]"}
-        assert err == ""
+            out, err = capsys.readouterr()
+            assert json.loads(out) == {"event": "email_sent", "email": "[REDACTED]"}
+            assert err == ""
 
-    def test_writes_errors_to_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
-        log({"event": "notify_failed"}, "error")
+    class TestGivenAnErrorEntry:
+        def test_writes_it_to_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+            log({"event": "notify_failed"}, "error")
 
-        out, err = capsys.readouterr()
-        assert out == ""
-        assert json.loads(err) == {"event": "notify_failed"}
+            out, err = capsys.readouterr()
+            assert out == ""
+            assert json.loads(err) == {"event": "notify_failed"}

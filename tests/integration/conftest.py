@@ -6,6 +6,7 @@ from typing import Any
 import boto3
 import pytest
 from mypy_boto3_dynamodb import DynamoDBClient
+from mypy_boto3_dynamodb.service_resource import Table
 from mypy_boto3_dynamodbstreams import DynamoDBStreamsClient
 
 # Runs against DynamoDB Local (`npm run db:up`).
@@ -43,3 +44,10 @@ def users_table(dynamodb: DynamoDBClient) -> Iterator[str]:
     )
     yield name
     dynamodb.delete_table(TableName=name)
+
+
+@pytest.fixture
+def table(users_table: str) -> Table:
+    """The fresh Users table through DynamoDB's resource interface, as the Lambdas use it."""
+    resource = boto3.resource("dynamodb", **_LOCAL)  # pyright: ignore[reportUnknownMemberType]
+    return resource.Table(users_table)
