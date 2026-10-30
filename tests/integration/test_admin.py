@@ -91,3 +91,19 @@ class TestListUsersByStatus:
             assert (status, body["error"]["code"]) == (400, "validation_failed")
             assert body["error"]["message"] == "Query is invalid"
             assert [issue["path"] for issue in body["error"]["details"]] == [["status"]]
+
+
+def profile(table: "Table", user_id: str) -> dict[str, Any]:
+    return table.get_item(Key={"pk": f"USER#{user_id}", "sk": "PROFILE"}, ConsistentRead=True)["Item"]
+
+
+class TestEnableUser:
+    class TestGivenAPendingUser:
+        def test_activates_them_so_they_can_sign_in(self, handler: Handler, table: "Table") -> None:
+            user = seed_user(table, "quentin", "pending", email="q@example.com")
+
+            status, body = call(handler, "POST /api/v1/admin/users/{id}/enable", params={"id": user["id"]})
+
+            assert status == 200
+            assert body == {**user, "status": "active"}
+            assert profile(table, user["id"])["status"] == "active"
