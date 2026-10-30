@@ -142,3 +142,19 @@ class TestDisableUser:
             assert profile(table, rita["id"])["status"] == "disabled"
             assert refresh_tokens(table, rita["id"]) == []
             assert len(refresh_tokens(table, other["id"])) == 1
+
+    class TestGivenAnAdmin:
+        def test_refuses_with_409_so_the_last_admin_cant_be_locked_out(self, handler: Handler, table: "Table") -> None:
+            root = seed_user(table, "root", "active", role="admin")
+
+            status, body = call(handler, "POST /api/v1/admin/users/{id}/disable", params={"id": root["id"]})
+
+            assert (status, body["error"]["code"]) == (409, "cannot_disable_admin")
+            assert profile(table, root["id"])["status"] == "active"
+
+    class TestGivenAnUnknownUserId:
+        def test_returns_404_user_not_found_without_creating_a_profile(self, handler: Handler, table: "Table") -> None:
+            status, body = call(handler, "POST /api/v1/admin/users/{id}/disable", params={"id": "no-such-user"})
+
+            assert (status, body["error"]["code"]) == (404, "user_not_found")
+            assert profile(table, "no-such-user") == {}
