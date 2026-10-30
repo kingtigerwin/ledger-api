@@ -3,7 +3,9 @@
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
+
+from pydantic import TypeAdapter
 
 from ledger_api.log import log
 
@@ -51,6 +53,10 @@ def require_admin(event: Event, scope: Literal["admin:read", "admin:write"]) -> 
     if ctx.role != "admin" or scope not in ctx.scope.split(" "):
         raise ApiError(403, "forbidden", "Admins only")
     return ctx
+
+
+def parse_body[T](event: Event, schema: TypeAdapter[T]) -> T:
+    return cast(T, {})
 
 
 def json_response(status: int, body: Any) -> Response:

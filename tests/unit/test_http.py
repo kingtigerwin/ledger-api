@@ -1,9 +1,11 @@
+import base64
 import json
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, TypedDict
 
 import pytest
+from pydantic import StrictInt, StringConstraints, TypeAdapter
 
-from ledger_api.http import ApiError, AuthContext, Event, Response, require_admin, with_errors
+from ledger_api.http import ApiError, AuthContext, Event, Response, parse_body, require_admin, with_errors
 
 
 def event(**overrides: Any) -> Event:
@@ -90,3 +92,45 @@ class TestRequireAdmin:
             assert require_admin(as_caller(ADMIN), "admin:write") == AuthContext(
                 user_id="admin-1", role="admin", scope="admin:read admin:write"
             )
+
+
+class Pet(TypedDict):
+    name: Annotated[str, StringConstraints(min_length=1)]
+    legs: StrictInt
+
+
+PET = TypeAdapter(Pet)
+
+
+def with_body(text: str, *, base64_encoded: bool = False) -> Event:
+    return event(body=text, isBase64Encoded=base64_encoded)
+
+
+class TestParseBody:
+    class TestGivenABodyThatMatchesTheSchema:
+        def test_returns_it(self) -> None:
+            assert parse_body(with_body('{"name": "Rex", "legs": 4}'), PET) == {"name": "Rex", "legs": 4}
+
+        def test_decodes_a_base64_body_first(self) -> None:
+            encoded = base64.b64encode(b'{"name": "Rex", "legs": 4}').decode()
+
+            assert parse_body(with_body(encoded, base64_encoded=True), PET) == {"name": "Rex", "legs": 4}
+
+    class TestGivenABodyThatIsntJson:
+        @pytest.mark.parametrize("text", ["{name:", "", "\\ufffe"])
+        def test_refuses_with_400_invalid_json(self, text: str) -> None:
+            with pytest.raises(ApiError) as raised:
+                parse_body(with_body(text), PET)
+
+            assert (raised.value.status, raised.value.code) == (400, "invalid_json")
+
+    class TestGivenJsonThatBreaksTheSchema:
+        def test_refuses_with_400_validation_failed_listing_each_field_as_zod_does(self) -> None:
+            with pytest.raises(ApiError) as raised:
+                parse_body(with_body('{"name": "", "legs": "four"}'), PET)
+
+            assert (raised.value.status, raised.value.code) == (400, "validation_failed")
+            assert raised.value.message == "Request body is invalid"
+            issues = raised.value.details
+            assert [issue["path"] for issue in issues] == [["name"], ["legs"]]
+            assert all(set(issue) == {"code", "path", "message"} for issue in issues)
