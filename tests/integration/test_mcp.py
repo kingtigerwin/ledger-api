@@ -22,6 +22,11 @@ def customer(user_id: str) -> dict[str, str]:
 
 READ_ONLY = {"userId": "mcp-read-only", "role": "customer", "scope": "transactions:read"}
 
+
+def admin(user_id: str) -> dict[str, str]:
+    return {"userId": user_id, "role": "admin", "scope": "admin:read admin:write transactions:read transactions:write"}
+
+
 # "today I went to woolworth and bought 30 dollars for cake", as Claude would fill the tool in.
 CAKE = {"date": "2026-10-27", "merchant": "Woolworths", "category": "groceries", "item": "cake", "amountCents": 3000}
 
@@ -334,6 +339,21 @@ class TestPostMcp:
             assert logged["event"] == "mcp_tool_failed"
             assert logged["tool"] == "get_transaction"
             assert logged["err"]["message"] == "table unreachable"
+
+    class TestGivenAnAdminToken:
+        def test_offers_list_all_transactions_as_a_read_only_tool_with_the_list_filters(self, mcp: Handler) -> None:
+            _, body = rpc(mcp, admin("mcp-admin-tools"), "tools/list")
+
+            tool = next(t for t in body["result"]["tools"] if t["name"] == "list_all_transactions")
+            assert tool["annotations"]["readOnlyHint"] is True
+            assert sorted(tool["inputSchema"]["properties"]) == [
+                "category",
+                "cursor",
+                "from",
+                "limit",
+                "to",
+                "username",
+            ]
 
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
