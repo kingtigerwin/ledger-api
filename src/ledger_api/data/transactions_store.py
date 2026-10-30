@@ -121,7 +121,10 @@ class TransactionsStore:
             return stored, False
 
     def update(self, user_id: str, id: str, edit: TransactionEdit, now: datetime) -> Transaction:
-        """Applies an edit if its `version` is still current."""
+        """
+        Applies an edit if its `version` is still current. A new date changes the sort key, so the item
+        is moved: old item deleted, new one written and the pointer updated, atomically.
+        """
         current = self.get(user_id, id)
         assert current
         if current["version"] != edit["version"]:
@@ -131,8 +134,41 @@ class TransactionsStore:
             Transaction, {**current, **changes, "version": current["version"] + 1, "updatedAt": iso_timestamp(now)}
         )
         try:
-            self._table.put_item(Item=_to_item(user_id, next), ConditionExpression=Attr("version").eq(edit["version"]))
-        except self._client.exceptions.ConditionalCheckFailedException:
+            if next["date"] == current["date"]:
+                self._table.put_item(
+                    Item=_to_item(user_id, next), ConditionExpression=Attr("version").eq(edit["version"])
+                )
+            else:
+                self._move(user_id, current, next)
+        except (
+            self._client.exceptions.ConditionalCheckFailedException,
+            self._client.exceptions.TransactionCanceledException,
+        ):
             # Changed between our read and this write.
             raise VersionConflictError(id) from None
         return next
+
+    def _move(self, user_id: str, current: Transaction, next: Transaction) -> None:
+        name = self._table.name
+        self._client.transact_write_items(
+            TransactItems=[
+                {
+                    "Delete": {
+                        "TableName": name,
+                        "Key": _main_key(user_id, current["date"], current["id"]),
+                        "ConditionExpression": "version = :expected",
+                        "ExpressionAttributeValues": {":expected": current["version"]},
+                    }
+                },
+                {"Put": {"TableName": name, "Item": _to_item(user_id, next)}},
+                {
+                    "Update": {
+                        "TableName": name,
+                        "Key": _ref_key(user_id, current["id"]),
+                        "UpdateExpression": "SET #date = :date",
+                        "ExpressionAttributeNames": {"#date": "date"},
+                        "ExpressionAttributeValues": {":date": next["date"]},
+                    }
+                },
+            ]
+        )
