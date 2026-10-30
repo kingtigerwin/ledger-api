@@ -11,13 +11,15 @@ from pydantic import TypeAdapter
 
 from ledger_api.auth.users_store import UsersStore
 from ledger_api.data.ledger import Ledger
-from ledger_api.data.schemas import TRANSACTION_FIELDS, TransactionFields
+from ledger_api.data.schemas import LIST_QUERY, SUMMARY_QUERY, TRANSACTION_FIELDS, TransactionFields
 from ledger_api.data.ulid import new_ulid
 from ledger_api.http import AuthContext, Event, Handler, Response, auth_context, with_errors
+from ledger_api.mcp.schemas import BY_ID, TRANSACTION_CHANGE
 from ledger_api.mcp.transport import serve
 
 type Scope = Literal["transactions:read", "transactions:write", "admin:read"]
 
+_READ = types.ToolAnnotations(read_only_hint=True, open_world_hint=False)
 _WRITE = types.ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
 
 
@@ -62,6 +64,10 @@ def _inline(schema: dict[str, Any]) -> dict[str, Any]:
     return {key: resolve(value) for key, value in schema.items() if key not in ("title", "description")}
 
 
+def _not_yet(caller: AuthContext, input: Any) -> Any:
+    raise NotImplementedError
+
+
 def _text(text: str, *, is_error: bool = False) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=is_error)
 
@@ -91,6 +97,64 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             schema=TRANSACTION_FIELDS,
             annotations=_WRITE.model_copy(update={"idempotent_hint": False}),
             run=create_transaction,
+        ),
+        _Tool(
+            name="get_transaction",
+            scope="transactions:read",
+            title="Get a transaction",
+            description="One of the signed-in customer's transactions, by id, including its current version.",
+            schema=BY_ID,
+            annotations=_READ,
+            run=_not_yet,
+        ),
+        _Tool(
+            name="list_transactions",
+            scope="transactions:read",
+            title="List transactions",
+            description=(
+                "The signed-in customer's transactions, newest first, as { items, nextCursor }. "
+                "Optional filters: from and to (YYYY-MM-DD, inclusive), category. limit is 1-100 (default 50). "
+                "For the next page, call again with the same filters and cursor set to nextCursor; "
+                "it is null on the last page."
+            ),
+            schema=LIST_QUERY,
+            annotations=_READ,
+            run=_not_yet,
+        ),
+        _Tool(
+            name="get_monthly_summary",
+            scope="transactions:read",
+            title="Monthly spending summary",
+            description=(
+                "The signed-in customer's total spending for a month (YYYY-MM), in cents, "
+                "and by category, largest first."
+            ),
+            schema=SUMMARY_QUERY,
+            annotations=_READ,
+            run=_not_yet,
+        ),
+        _Tool(
+            name="update_transaction",
+            scope="transactions:write",
+            title="Edit a transaction",
+            description=(
+                "Changes some fields of one of the signed-in customer's transactions. Send only the fields to "
+                "change, plus the version from your latest read (get_transaction or list_transactions). "
+                "If someone changed it since, the call fails: read it again and retry. "
+                "Returns the updated transaction."
+            ),
+            schema=TRANSACTION_CHANGE,
+            annotations=_WRITE.model_copy(update={"idempotent_hint": False}),
+            run=_not_yet,
+        ),
+        _Tool(
+            name="delete_transaction",
+            scope="transactions:write",
+            title="Delete a transaction",
+            description="Permanently deletes one of the signed-in customer's transactions, by id.",
+            schema=BY_ID,
+            annotations=_WRITE.model_copy(update={"destructive_hint": True, "idempotent_hint": True}),
+            run=_not_yet,
         ),
     ]
 
