@@ -105,7 +105,7 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             description="One of the signed-in customer's transactions, by id, including its current version.",
             schema=BY_ID,
             annotations=_READ,
-            run=_not_yet,
+            run=lambda caller, input: ledger.get(caller.user_id, input["id"]),
         ),
         _Tool(
             name="list_transactions",
