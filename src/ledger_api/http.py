@@ -32,8 +32,19 @@ class AuthContext:
     scope: str
 
 
+def auth_context(event: Event) -> AuthContext:
+    """
+    Every protected route is behind the authorizer, so a missing caller means a misconfigured
+    route; refuse rather than serve anonymously.
+    """
+    ctx = (event.get("requestContext") or {}).get("authorizer", {}).get("lambda") or {}
+    if not ctx.get("userId"):
+        raise ApiError(401, "unauthorized", "Sign in first")
+    return AuthContext(user_id=str(ctx["userId"]), role=str(ctx.get("role", "")), scope=str(ctx.get("scope", "")))
+
+
 def require_admin(event: Event, scope: Literal["admin:read", "admin:write"]) -> AuthContext:
-    return AuthContext(user_id="", role="", scope="")
+    return auth_context(event)
 
 
 def json_response(status: int, body: Any) -> Response:
