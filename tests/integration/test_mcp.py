@@ -73,6 +73,10 @@ def failure(reply: Reply) -> str:
     return body["result"]["content"][0]["text"]
 
 
+def amounts(page: Any) -> list[int]:
+    return [t["amountCents"] for t in page["items"]]
+
+
 def own(ledger: Ledger, user_id: str) -> list[Any]:
     """What the customer would see over REST."""
     return ledger.list(user_id, {"from": "2026-10-01"})["items"]
@@ -154,6 +158,30 @@ class TestPostMcp:
             message = failure(call_tool(mcp, customer("mcp-get-other"), "get_transaction", {"id": theirs["id"]}))
 
             assert "no such transaction" in message.lower()
+
+        def test_list_transactions_pages_through_the_customers_own_newest_first_with_filters(
+            self, mcp: Handler
+        ) -> None:
+            who = customer("mcp-list-own")
+            for date, category, amount in [("2026-10-01", "groceries", 100), ("2026-10-02", "dining", 200),
+                                           ("2026-10-03", "groceries", 300)]:  # fmt: skip
+                call_tool(
+                    mcp, who, "create_transaction", CAKE | {"date": date, "category": category, "amountCents": amount}
+                )
+
+            first = payload(call_tool(mcp, who, "list_transactions", {"limit": 2}))
+            second = payload(call_tool(mcp, who, "list_transactions", {"limit": 2, "cursor": first["nextCursor"]}))
+            groceries = payload(call_tool(mcp, who, "list_transactions", {"category": "groceries"}))
+
+            assert amounts(first) == [300, 200]
+            assert amounts(second) == [100]
+            assert second["nextCursor"] is None
+            assert amounts(groceries) == [300, 100]
+
+        def test_list_transactions_refuses_a_tampered_cursor(self, mcp: Handler) -> None:
+            message = failure(call_tool(mcp, customer("mcp-cursor"), "list_transactions", {"cursor": "bad.cursor"}))
+
+            assert "cursor" in message
 
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
