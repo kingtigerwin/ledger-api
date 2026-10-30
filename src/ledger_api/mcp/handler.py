@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -61,6 +62,10 @@ def _inline(schema: dict[str, Any]) -> dict[str, Any]:
     return {key: resolve(value) for key, value in schema.items() if key not in ("title", "description")}
 
 
+def _text(text: str, *, is_error: bool = False) -> types.CallToolResult:
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=is_error)
+
+
 def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], datetime]) -> Handler:
     """
     MCP over Streamable HTTP, stateless: each request gets a fresh server holding only the caller's
@@ -97,7 +102,14 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
         ) -> types.ListToolsResult:
             return types.ListToolsResult(tools=[tool.listing() for tool in offered])
 
-        return Server("ledger-api", version="1.0.0", on_list_tools=list_tools)
+        async def call_tool(
+            ctx: ServerRequestContext[Any], params: types.CallToolRequestParams
+        ) -> types.CallToolResult:
+            tool = next(tool for tool in offered if tool.name == params.name)
+            result = tool.run(caller, tool.schema.validate_python(params.arguments or {}))
+            return _text(json.dumps(result, ensure_ascii=False))
+
+        return Server("ledger-api", version="1.0.0", on_list_tools=list_tools, on_call_tool=call_tool)
 
     def handle(event: Event) -> Response:
         return serve(server_for(auth_context(event)), event)
