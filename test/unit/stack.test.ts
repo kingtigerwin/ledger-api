@@ -84,7 +84,7 @@ describe("LedgerStack", () => {
       Architectures: ["arm64"],
       LoggingConfig: { LogFormat: "JSON" },
       MemorySize: 256,
-      Environment: { Variables: { USERS_TABLE: Match.anyValue() } },
+      Environment: { Variables: { USERS_TABLE: { Ref: expect.stringMatching(/^UsersTable/) } } },
     });
   });
 
