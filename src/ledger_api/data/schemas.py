@@ -2,7 +2,7 @@
 
 import re
 from datetime import date
-from typing import Annotated, Literal, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, Required, TypedDict
 
 from pydantic import AfterValidator, Field, StrictInt, StrictStr, StringConstraints, TypeAdapter
 
@@ -50,6 +50,18 @@ class NewTransaction(TypedDict):
     note: NotRequired[Note]
 
 
+class TransactionEdit(TypedDict, total=False):
+    """A partial edit of the fields a customer edits, plus the version the client last read."""
+
+    version: Required[Annotated[StrictInt, Field(gt=0)]]
+    date: IsoDate
+    merchant: Merchant
+    category: Category
+    item: Item
+    amountCents: AmountCents
+    note: Note
+
+
 class Transaction(NewTransaction):
     version: int
     createdAt: str
@@ -57,3 +69,4 @@ class Transaction(NewTransaction):
 
 
 NEW_TRANSACTION = TypeAdapter(NewTransaction)
+TRANSACTION_EDIT = TypeAdapter(TransactionEdit)

@@ -1,9 +1,11 @@
 """The Data table's transactions, as src/data/transactions-store.ts reads and writes them (src/data/data-table.ts)."""
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from ledger_api.data.schemas import NewTransaction, Transaction
+from boto3.dynamodb.conditions import Attr
+
+from ledger_api.data.schemas import NewTransaction, Transaction, TransactionEdit
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
@@ -113,3 +115,17 @@ class TransactionsStore:
             if not stored:
                 raise
             return stored, False
+
+    def update(self, user_id: str, id: str, edit: TransactionEdit, now: datetime) -> Transaction:
+        """Applies an edit if its `version` is still current."""
+        current = self.get(user_id, id)
+        assert current
+        changes = {k: v for k, v in edit.items() if k != "version"}
+        next = cast(
+            Transaction, {**current, **changes, "version": current["version"] + 1, "updatedAt": iso_timestamp(now)}
+        )
+        self._table.put_item(
+            Item=_to_item(user_id, next),
+            ConditionExpression=Attr("version").eq(edit["version"]),
+        )
+        return next

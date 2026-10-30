@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
-from ledger_api.data.schemas import NewTransaction, Transaction
+from ledger_api.data.schemas import NewTransaction, Transaction, TransactionEdit
 from ledger_api.data.transactions_store import TransactionsStore
 from ledger_api.data.ulid import ulid_time
 from ledger_api.http import ApiError
@@ -38,3 +38,6 @@ class Ledger:
         if not transaction:
             raise _not_found()
         return transaction
+
+    def update(self, user_id: str, id: str, edit: TransactionEdit) -> Transaction:
+        return self._transactions.update(user_id, id, edit, self._now())
