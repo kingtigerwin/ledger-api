@@ -151,3 +151,12 @@ class TestEditATransaction:
                 f"TXN#2026-09-01#{body['id']}",
                 f"TXNREF#{body['id']}",
             ]
+
+    class TestGivenAnotherCustomersTransaction:
+        def test_returns_404(self, handler: Handler) -> None:
+            body = expense()
+            create(handler, "tx-house-i", body)
+
+            status, res = patch(handler, "tx-house-j", body["id"], {"version": 1, "amountCents": 1})
+
+            assert (status, res["error"]["code"]) == (404, "transaction_not_found")
