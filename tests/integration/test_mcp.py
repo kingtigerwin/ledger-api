@@ -253,6 +253,30 @@ class TestPostMcp:
             assert "changed" in message
             assert ledger.get("mcp-stale", created["id"])["amountCents"] == 3500
 
+        def test_delete_transaction_removes_it_and_a_second_delete_reports_its_gone(
+            self, mcp: Handler, ledger: Ledger
+        ) -> None:
+            who = customer("mcp-delete")
+            created = payload(call_tool(mcp, who, "create_transaction", CAKE))
+
+            assert payload(call_tool(mcp, who, "delete_transaction", {"id": created["id"]})) == {
+                "id": created["id"],
+                "deleted": True,
+            }
+            again = failure(call_tool(mcp, who, "delete_transaction", {"id": created["id"]}))
+
+            assert own(ledger, "mcp-delete") == []
+            assert "no such transaction" in again.lower()
+
+        def test_delete_transaction_leaves_another_customers_transaction_alone(
+            self, mcp: Handler, ledger: Ledger
+        ) -> None:
+            theirs = payload(call_tool(mcp, customer("mcp-del-owner"), "create_transaction", CAKE))
+
+            failure(call_tool(mcp, customer("mcp-del-other"), "delete_transaction", {"id": theirs["id"]}))
+
+            assert ledger.get("mcp-del-owner", theirs["id"]) == theirs
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
