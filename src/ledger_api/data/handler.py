@@ -62,6 +62,10 @@ def create_data_handler(*, ledger: Ledger) -> Handler:
             case "GET /api/v1/admin/transactions":
                 require_admin(event, "admin:read")
                 return json_response(200, ledger.list_all(parse_query(event, LIST_QUERY)))
+            case "PATCH /api/v1/admin/users/{id}/transactions/{transactionId}":
+                require_admin(event, "admin:write")
+                edit = parse_body(event, TRANSACTION_EDIT)
+                return json_response(200, ledger.update(_param(event, "id"), _param(event, "transactionId"), edit))
             case route:
                 raise ApiError(404, "route_not_found", f"No route for {route}")
 
