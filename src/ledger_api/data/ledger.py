@@ -2,7 +2,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-from ledger_api.data.cursor import decode_cursor, encode_cursor
+from ledger_api.data.cursor import InvalidCursorError, decode_cursor, encode_cursor
 from ledger_api.data.schemas import DEFAULT_LIMIT, ListQuery, NewTransaction, Transaction, TransactionEdit
 from ledger_api.data.transactions_store import TransactionNotFoundError, TransactionsStore, VersionConflictError
 from ledger_api.data.ulid import ulid_time
@@ -10,6 +10,10 @@ from ledger_api.http import ApiError
 
 # Client clocks drift a little; an ID from further ahead than this would distort the sort order.
 MAX_CLOCK_SKEW = timedelta(minutes=5)
+
+
+def _invalid_cursor() -> ApiError:
+    return ApiError(400, "invalid_cursor", "The cursor is invalid; start from the first page")
 
 
 def _not_found() -> ApiError:
@@ -60,12 +64,16 @@ class Ledger:
     def list(self, user_id: str, query: ListQuery) -> dict[str, Any]:
         """One page of the customer's transactions, with a signed cursor for the next page."""
         cursor = query.get("cursor")
+        try:
+            start_key = decode_cursor(cursor, self._cursor_secret) if cursor else None
+        except InvalidCursorError:
+            raise _invalid_cursor() from None
         items, last_key = self._transactions.list(
             user_id,
             date_from=query.get("from"),
             date_to=query.get("to"),
             category=query.get("category"),
             limit=query.get("limit", DEFAULT_LIMIT),
-            start_key=decode_cursor(cursor, self._cursor_secret) if cursor else None,
+            start_key=start_key,
         )
         return {"items": items, "nextCursor": encode_cursor(last_key, self._cursor_secret) if last_key else None}
