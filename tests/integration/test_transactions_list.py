@@ -73,3 +73,33 @@ class TestListTransactions:
 
             assert all(len(page) <= 2 for page in pages)
             assert [amount for page in pages for amount in page] == [6000, 5000, 4000, 3000, 2000, 1000]
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            pytest.param({"from": "2026-10-01", "to": "2026-10-31"}, [5000, 4000, 3000, 2000], id="a date range"),
+            pytest.param({"category": "groceries"}, [6000, 5000, 4000, 1000], id="a category"),
+            pytest.param(
+                {"category": "groceries", "from": "2026-10-01", "to": "2026-10-31"},
+                [5000, 4000],
+                id="category and dates together",
+            ),
+        ],
+    )
+    def test_filters_by(self, handler: Handler, query: dict[str, str], expected: list[int]) -> None:
+        pages = all_pages(handler, query | {"limit": "2"})
+
+        assert [amount for page in pages for amount in page] == expected
+
+    class TestGivenALimitOver100:
+        def test_rejects_it(self, handler: Handler) -> None:
+            assert list_transactions(handler, {"limit": "101"})[0] == 400
+
+    class TestGivenACursorThatWasTamperedWith:
+        def test_rejects_it_with_400_invalid_cursor(self, handler: Handler) -> None:
+            _, first = list_transactions(handler, {"limit": "2"})
+            payload, signature = first["nextCursor"].split(".")
+
+            status, res = list_transactions(handler, {"cursor": f"{payload}x.{signature}"})
+
+            assert (status, res["error"]["code"]) == (400, "invalid_cursor")
