@@ -183,6 +183,26 @@ class TestPostMcp:
 
             assert "cursor" in message
 
+        def test_get_monthly_summary_totals_a_month_by_category_largest_first(self, mcp: Handler) -> None:
+            who = customer("mcp-summary")
+            for date, category, amount in [("2026-09-30", "groceries", 9999), ("2026-10-05", "dining", 1500),
+                                           ("2026-10-06", "groceries", 3000), ("2026-10-07", "groceries", 500)]:  # fmt: skip
+                call_tool(
+                    mcp, who, "create_transaction", CAKE | {"date": date, "category": category, "amountCents": amount}
+                )
+
+            summary = payload(call_tool(mcp, who, "get_monthly_summary", {"month": "2026-10"}))
+
+            assert summary == {
+                "month": "2026-10",
+                "currency": "AUD",
+                "totalCents": 5000,
+                "byCategory": [
+                    {"category": "groceries", "totalCents": 3500},
+                    {"category": "dining", "totalCents": 1500},
+                ],
+            }
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
