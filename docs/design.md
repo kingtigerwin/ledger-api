@@ -83,11 +83,11 @@ All under `/api/v1`.
 
 ### MCP, for agents
 
-`POST /api/mcp` (outside `/api/v1`: MCP versions itself) speaks the Model Context Protocol over Streamable HTTP, stateless, with JSON responses (no sessions, no SSE stream), so it fits Lambda. It sits behind the same authorizer as the REST routes: the agent sends the signed-in user's own access token, and every tool acts as that user with that token's scopes. The REST API is unchanged; MCP is a second front door to the same store code (`src/mcp/handler.ts`).
+`POST /api/mcp` (outside `/api/v1`: MCP versions itself) speaks the Model Context Protocol over Streamable HTTP, stateless, with JSON responses (no sessions, no SSE stream), so it fits Lambda. It sits behind the same authorizer as the REST routes: the agent sends the signed-in user's own access token, and every tool acts as that user with that token's scopes. The REST API is unchanged; MCP is a second front door to the same ledger code (`src/ledger_api/mcp/handler.py`, on the MCP Python SDK).
 
 Agents call `/api/mcp` and never the REST routes. The flow it was built for: the UI signs the customer in over REST and sends their free text ("today I went to woolworth and bought 30 dollars for cake") plus their access token to the agent (`ledger-agent`, Python, Claude), which calls `create_transaction` over MCP with that token.
 
-Each customer tool mirrors a Transactions route and acts on the signed-in user's own transactions. Tools whose scope the token lacks are hidden from `tools/list` and refused; admin tools also need the `admin` role, as the REST admin routes do, so a customer token never sees them. Results are JSON text: the same bodies the REST routes return, except that `list_all_transactions` adds `username`. Failures (not found, stale version, bad cursor) come back as tool errors (`isError: true`) with the REST error's message; bad arguments are rejected against the same Zod schemas.
+Each customer tool mirrors a Transactions route and acts on the signed-in user's own transactions. Tools whose scope the token lacks are hidden from `tools/list` and refused; admin tools also need the `admin` role, as the REST admin routes do, so a customer token never sees them. Results are JSON text: the same bodies the REST routes return, except that `list_all_transactions` adds `username`. Failures (not found, stale version, bad cursor) come back as tool errors (`isError: true`) with the REST error's message; bad arguments are rejected against the same pydantic schemas, as a tool error naming each field (`category: Input should be ...`). A tool the caller may not use, or one that doesn't exist, gets the same `No tool named ...` error.
 
 | Tool | Route it mirrors | Needs | Notes |
 |---|---|---|---|
@@ -99,7 +99,7 @@ Each customer tool mirrors a Transactions route and acts on the signed-in user's
 | `delete_transaction` | `DELETE /transactions/{id}` | `transactions:write` | Marked destructive, so clients can ask before calling it. |
 | `list_all_transactions` | `GET /admin/transactions` | `admin:read` (and the `admin` role) | Read-only. Every customer's transactions, newest first, same filters and cursors. Each item has `userId` and `username` (null if the user can't be found). Optional `username` (any case) limits it to one customer, for "show haoran's spending": it is resolved through the username claim and lists that customer's own partition, and an unknown username is a `user_not_found` tool error rather than an empty list. Cursors don't carry over between the filtered and unfiltered lists. Unfiltered pages get their usernames from one `BatchGetItem` per page on the Users table, which the MCP Lambda can read but not write. |
 
-The rules live in `src/ledger_api/data/ledger.py` for REST and in `src/data/ledger.ts` for `src/mcp/handler.ts`, the same in both until MCP moves to Python too. The agent puts today's date, in the customer's time zone, into Claude's prompt, so "today" resolves to a real date. The admin's write routes (edit or delete any customer's transaction) and the user-management routes are not exposed over MCP.
+REST and MCP share the rules in `src/ledger_api/data/ledger.py`. The agent puts today's date, in the customer's time zone, into Claude's prompt, so "today" resolves to a real date. The admin's write routes (edit or delete any customer's transaction) and the user-management routes are not exposed over MCP.
 
 ## Account emails
 

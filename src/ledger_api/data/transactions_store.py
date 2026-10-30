@@ -1,4 +1,4 @@
-"""The Data table's transactions, as src/data/transactions-store.ts reads and writes them (src/data/data-table.ts)."""
+"""The Data table's transactions, keyed as src/data/data-table.ts defines (and the stack builds the table)."""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime

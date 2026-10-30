@@ -30,8 +30,8 @@ def _not_found() -> ApiError:
 
 class Ledger:
     """
-    What a customer (or the admin) can do with transactions, like src/data/ledger.ts: the REST
-    handler calls this, and so will the MCP tools once they move. Failures are `ApiError`s.
+    What a customer (or the admin) can do with transactions: the REST handler and the MCP tools
+    both call this, so they share rules and error messages. Failures are `ApiError`s.
     """
 
     def __init__(self, transactions: TransactionsStore, *, cursor_secret: str, now: Callable[[], datetime]) -> None:

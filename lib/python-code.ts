@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ILocalBundling } from "aws-cdk-lib";
+import { AssetHashType, type ILocalBundling } from "aws-cdk-lib";
 import { Code, Runtime } from "aws-cdk-lib/aws-lambda";
 
 const ROOT = path.join(__dirname, "..");
@@ -36,17 +36,25 @@ const uvBundling: ILocalBundling = {
       recursive: true,
       filter: (source) => !source.includes("__pycache__"),
     });
+    // /var/task is read-only, so without bytecode every cold start compiles everything from source (about 0.8 s).
+    // Unchecked hashes survive the copy into the asset, which changes file times; paths read as /var/task in tracebacks.
+    run("uv", [
+      "run", "--no-project", "--python", "3.13", "python", "-m", "compileall", "-q", "-j", "0",
+      "--invalidation-mode", "unchecked-hash", "-s", outputDir, "-p", "/var/task", outputDir,
+    ]);
     return true;
   },
 };
 
 /**
- * The code of every Python Lambda: one bundle, so CDK builds and uploads it once. Its hash covers the
- * package and the lock file, so a dependency change also makes a new bundle.
+ * The code of every Python Lambda: one bundle, so CDK builds and uploads it once. Its hash is of the bundle
+ * itself, so a change to the package, the lock file or the way it's built each make a new one.
  */
 export const pythonCode = () =>
   Code.fromAsset(ROOT, {
     exclude: ["*", "!src", "src/*", "!src/ledger_api", "!src/ledger_api/**", "**/__pycache__", "!pyproject.toml", "!uv.lock"],
+    // Hash what ships, not the source: a change to how the bundle is built (this file) then also makes a new one.
+    assetHashType: AssetHashType.OUTPUT,
     bundling: {
       local: uvBundling,
       // Only used if local bundling declines, which it never does: it fails loudly without uv instead.

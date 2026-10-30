@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 # boto3 comes with the Lambda runtime; the rest is bundled for arm64 Linux at synth (lib/python-code.ts).
 dependencies = [
     "boto3>=1.43.119",
+    "mcp>=2.3.0",
     "pydantic>=2.14.1",
 ]
 
