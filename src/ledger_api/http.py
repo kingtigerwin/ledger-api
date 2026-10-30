@@ -4,6 +4,8 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from ledger_api.log import log
+
 type Event = dict[str, Any]
 type Response = dict[str, Any]
 type Handler = Callable[[Event], Response]
@@ -33,5 +35,8 @@ def with_errors(handler: Handler) -> Handler:
             if err.details is not None:
                 error["details"] = err.details
             return json_response(err.status, {"error": error})
+        except Exception as err:
+            log({"event": "unhandled_error", "routeKey": event.get("routeKey"), "err": err}, "error")
+            return json_response(500, {"error": {"code": "internal_error", "message": "Internal server error"}})
 
     return wrapped
