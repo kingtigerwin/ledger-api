@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from boto3.dynamodb.conditions import Key
 
 from ledger_api.data.handler import create_data_handler
 from ledger_api.data.ledger import Ledger
@@ -130,3 +131,23 @@ class TestEditATransaction:
 
             assert (status, res["error"]["code"]) == (409, "version_conflict")
             assert get(handler, "tx-house-g", body["id"])[1]["amountCents"] == 5000
+
+    class TestGivenANewDate:
+        def test_moves_the_transaction_leaving_no_copy_and_its_still_found_by_id(
+            self, handler: Handler, data_table: "Table"
+        ) -> None:
+            body = expense()
+            create(handler, "tx-house-h", body)
+
+            status, _ = patch(handler, "tx-house-h", body["id"], {"version": 1, "date": "2026-09-01"})
+
+            assert status == 200
+            moved = get(handler, "tx-house-h", body["id"])[1]
+            assert (moved["date"], moved["version"]) == ("2026-09-01", 2)
+            items = data_table.query(KeyConditionExpression=Key("pk").eq("USER#tx-house-h"), ConsistentRead=True)[
+                "Items"
+            ]
+            assert sorted(str(item["sk"]) for item in items) == [
+                f"TXN#2026-09-01#{body['id']}",
+                f"TXNREF#{body['id']}",
+            ]
