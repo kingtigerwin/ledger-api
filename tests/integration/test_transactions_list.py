@@ -103,3 +103,11 @@ class TestListTransactions:
             status, res = list_transactions(handler, {"cursor": f"{payload}x.{signature}"})
 
             assert (status, res["error"]["code"]) == (400, "invalid_cursor")
+
+    class TestGivenAGenuineCursorFromADifferentFilter:
+        def test_rejects_it_with_400_invalid_cursor_rather_than_failing(self, handler: Handler) -> None:
+            _, first = list_transactions(handler, {"limit": "2"})
+
+            status, res = list_transactions(handler, {"category": "groceries", "cursor": first["nextCursor"]})
+
+            assert (status, res["error"]["code"]) == (400, "invalid_cursor")
