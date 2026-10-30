@@ -100,3 +100,22 @@ class TestRecordAndReadBack:
 
             assert status == 201
             assert "memberId" not in res
+
+
+def patch(handler: Handler, house: str, id: str, body: Any) -> tuple[int, Any]:
+    return call(handler, "PATCH /api/v1/transactions/{id}", body, auth=customer(house), params={"id": id})
+
+
+class TestEditATransaction:
+    class TestGivenTheCurrentVersion:
+        def test_applies_the_change_and_bumps_the_version(self, handler: Handler) -> None:
+            body = expense()
+            create(handler, "tx-house-f", body)
+
+            status, res = patch(
+                handler, "tx-house-f", body["id"], {"version": 1, "amountCents": 12000, "note": "plus fruit"}
+            )
+
+            assert status == 200
+            assert res | {"amountCents": 12000, "note": "plus fruit", "item": "菜", "version": 2} == res
+            assert get(handler, "tx-house-f", body["id"]) == (200, res)
