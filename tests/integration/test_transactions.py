@@ -160,3 +160,27 @@ class TestEditATransaction:
             status, res = patch(handler, "tx-house-j", body["id"], {"version": 1, "amountCents": 1})
 
             assert (status, res["error"]["code"]) == (404, "transaction_not_found")
+
+
+def remove(handler: Handler, house: str, id: str) -> tuple[int, Any]:
+    return call(handler, "DELETE /api/v1/transactions/{id}", auth=customer(house), params={"id": id})
+
+
+class TestDeleteATransaction:
+    class TestGivenTheCustomersOwnTransaction:
+        def test_deletes_it_with_204_and_no_body(self, handler: Handler) -> None:
+            body = expense()
+            create(handler, "tx-house-k", body)
+
+            assert remove(handler, "tx-house-k", body["id"]) == (204, None)
+            assert get(handler, "tx-house-k", body["id"])[0] == 404
+
+    class TestGivenAnotherCustomersTransaction:
+        def test_returns_404_and_leaves_it_alone(self, handler: Handler) -> None:
+            body = expense()
+            create(handler, "tx-house-l", body)
+
+            status, res = remove(handler, "tx-house-m", body["id"])
+
+            assert (status, res["error"]["code"]) == (404, "transaction_not_found")
+            assert get(handler, "tx-house-l", body["id"])[0] == 200
