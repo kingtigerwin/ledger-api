@@ -73,6 +73,22 @@ class UsersStore:
         item = self._table.get_item(Key=_profile_key(user_id), ConsistentRead=True).get("Item")
         return _user(item) if item else None
 
+    def usernames(self, user_ids: list[str]) -> dict[str, str]:
+        """Usernames by user ID; IDs with no profile are left out. BatchGet takes at most 100 keys a call."""
+        found: dict[str, str] = {}
+        unique = list(dict.fromkeys(user_ids))
+        name = self._table.name
+        for start in range(0, len(unique), 100):
+            keys: list[dict[str, Any]] = [_profile_key(user_id) for user_id in unique[start : start + 100]]
+            while keys:
+                res = self._table.meta.client.batch_get_item(
+                    RequestItems={name: {"Keys": keys, "ProjectionExpression": "id, username"}}
+                )
+                found.update((str(item["id"]), str(item["username"])) for item in res["Responses"].get(name, []))
+                unprocessed = res.get("UnprocessedKeys", {})
+                keys = list(unprocessed[name]["Keys"]) if name in unprocessed else []
+        return found
+
     def set_status(self, user_id: str, status: UserStatus) -> User:
         """Raises UserNotFoundError rather than creating a profile for an unknown ID."""
         try:

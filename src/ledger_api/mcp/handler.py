@@ -96,7 +96,9 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
         return {"id": ref["id"], "deleted": True}
 
     def list_all_transactions(caller: AuthContext, query: ListAllQuery) -> Any:
-        raise NotImplementedError
+        page = ledger.list_all(query)
+        usernames = users.usernames([t["userId"] for t in page["items"]])
+        return page | {"items": [t | {"username": usernames.get(t["userId"])} for t in page["items"]]}
 
     tools: list[_Tool[Any]] = [
         _Tool(
