@@ -286,6 +286,34 @@ class TestPostMcp:
             assert "category" in message
             assert own(ledger, "mcp-invalid") == []
 
+    class TestGivenATokenWithoutTheTransactionsWriteScope:
+        READ_ONLY = {"userId": "mcp-read-only", "role": "customer", "scope": "transactions:read"}
+
+        def test_offers_only_the_read_tools(self, mcp: Handler) -> None:
+            _, body = rpc(mcp, self.READ_ONLY, "tools/list")
+
+            assert sorted(t["name"] for t in body["result"]["tools"]) == [
+                "get_monthly_summary",
+                "get_transaction",
+                "list_transactions",
+            ]
+
+        @pytest.mark.parametrize(
+            ("name", "arguments"),
+            [
+                pytest.param("create_transaction", CAKE, id="create"),
+                pytest.param("update_transaction", {"id": "01J0000000000000000000000A", "version": 1}, id="update"),
+                pytest.param("delete_transaction", {"id": "01J0000000000000000000000A"}, id="delete"),
+            ],
+        )
+        def test_refuses_the_write_tools(
+            self, mcp: Handler, ledger: Ledger, name: str, arguments: dict[str, Any]
+        ) -> None:
+            message = failure(call_tool(mcp, self.READ_ONLY, name, arguments))
+
+            assert name in message
+            assert own(ledger, "mcp-read-only") == []
+
     class TestGivenNoAuthorizerContext:
         def test_refuses_with_401(self, mcp: Handler) -> None:
             status, _ = rpc(mcp, None, "tools/list")
