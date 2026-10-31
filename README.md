@@ -60,7 +60,7 @@ GitHub Actions deploys `main` using GitHub's OIDC login, so no AWS keys are stor
 - Run the smoke test yourself:
 
   ```sh
-  API_URL=https://api.haoran.cloud SMOKE_TEST_PASSWORD=... npm run smoke
+  API_URL=https://api.haoran.cloud SMOKE_TEST_PASSWORD=... uv run scripts/smoke.py
   ```
 
 ## MCP

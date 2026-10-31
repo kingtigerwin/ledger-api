@@ -14,14 +14,14 @@ uv run pytest tests/unit      # one folder
 uv run pytest -k "pending"    # tests matching a name
 uv run ruff check && uv run ruff format --check
 uv run pyright                # strict mode
+API_URL=... SMOKE_TEST_PASSWORD=... uv run scripts/smoke.py   # round trip against a deployed API
 
-# TypeScript: the CDK app and the smoke test
+# TypeScript: the CDK app
 npm run typecheck             # tsc --noEmit; nothing is emitted, tsx/esbuild run the TypeScript directly
 npm run lint
 npm run test:unit             # the stack, its routes against the spec, and the Python bundles
 npx vitest run -t "given a pending user"             # tests matching a name
 npm run synth                 # cdk synth (both stacks)
-API_URL=... SMOKE_TEST_PASSWORD=... npm run smoke   # round trip against a deployed API
 ```
 
 Deploys: `LedgerApi` is deployed by the `deploy` job in `.github/workflows/ci.yml` on push to `main` (GitHub OIDC, then the smoke test). `LedgerApiCiAccess` (the OIDC provider and deploy role) is deployed once by hand; see README.md.

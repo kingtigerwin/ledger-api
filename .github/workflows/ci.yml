@@ -72,6 +72,6 @@ jobs:
           ALARM_EMAIL: ${{ vars.ALARM_EMAIL }}
           ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
       - name: Smoke test
-        run: API_URL="$(jq -r .LedgerApi.ApiUrl cdk-outputs.json)" npm run smoke
+        run: API_URL="$(jq -r .LedgerApi.ApiUrl cdk-outputs.json)" uv run scripts/smoke.py
         env:
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
