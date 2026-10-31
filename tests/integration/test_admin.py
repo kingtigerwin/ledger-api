@@ -251,7 +251,7 @@ class TestDeleteUser:
             assert store.find_by_google_sub("42") is None
             back = store.create_google_user(sub="42", username="sam-g1", email="sam@example.com", now=NOW)
             assert back.id != gone.id
-            assert back.status == "pending"
+            assert back.status == "active"
 
         def test_leaves_another_google_users_claim_alone(self, handler: Handler, table: "Table") -> None:
             sisi = seed_sisi(table)

@@ -38,7 +38,7 @@ GitHub Actions deploys `main` using GitHub's OIDC login, so no AWS keys are stor
    | Secret | `SMOKE_TEST_PASSWORD` | any long random string, e.g. `openssl rand -base64 24`; the smoke test's user signs up with it |
    | Variable | `DEPLOY_ENABLED` | `true` (turns the deploy job on) |
    | Variable | `ALARM_EMAIL` | where to email alarms (optional) |
-   | Variable | `ADMIN_EMAIL` | where to email each new sign-up for approval: the admin's own address (optional; needs `emailFrom` in `cdk.json`) |
+   | Variable | `ADMIN_EMAIL` | where to email each new sign-up: the admin's own address (optional; needs `emailFrom` in `cdk.json`) |
 
 3. Push to `main` (or re-run the CI workflow on `main`). The `deploy` job runs `cdk deploy LedgerApi` (plus `LedgerApiCertificate` first, if a custom domain is set) and then the smoke test against the `ApiUrl` output.
 

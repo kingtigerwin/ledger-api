@@ -45,6 +45,40 @@ class TestEmailsFor:
             assert "sign in with Google" in approved.text
             assert "sign in as" not in approved.text
 
+    class TestGivenSomeoneNewWhoSignedInWithGoogle:
+        def test_tells_the_admin_they_joined_then_welcomes_them(self) -> None:
+            after = profile(authProvider="google", passwordHash=None, status="active")
+
+            notice, welcome = emails_for(None, after, SETTINGS)
+
+            assert (notice.kind, notice.to) == ("new_signup", "sisi@example.com")
+            assert "haoran" in notice.subject
+            assert "approval" not in notice.subject
+            assert "haoran@example.com" in notice.text
+            assert "POST https://api.haoran.cloud/api/v1/admin/users/u-1/disable" in notice.text
+            assert (welcome.kind, welcome.to) == ("welcome", "haoran@example.com")
+            assert welcome.subject == "Welcome to Ledger"
+            assert "sign in with Google" in welcome.text
+
+        def test_points_the_admin_at_the_admin_page_when_there_is_one(self) -> None:
+            settings = EmailSettings(
+                api_url=SETTINGS.api_url,
+                admin_email=SETTINGS.admin_email,
+                admin_page_url="https://ledger.haoran.cloud/admin",
+            )
+            after = profile(authProvider="google", passwordHash=None, status="active")
+
+            notice, _ = emails_for(None, after, settings)
+
+            assert "https://ledger.haoran.cloud/admin" in notice.text
+            assert "POST" not in notice.text
+
+        def test_only_welcomes_them_when_there_is_no_admin_address(self) -> None:
+            settings = EmailSettings(api_url=SETTINGS.api_url)
+            after = profile(authProvider="google", passwordHash=None, status="active")
+
+            assert [e.kind for e in emails_for(None, after, settings)] == ["welcome"]
+
     class TestGivenACustomerWhoHasJustRegistered:
         def test_asks_the_admin_to_approve_or_reject_it_then_tells_them_the_account_is_waiting(self) -> None:
             # The admin's first, so a customer's address SES won't take can't hold it up.

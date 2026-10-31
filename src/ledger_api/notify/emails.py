@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Literal
 
-type EmailKind = Literal["pending", "approved", "new_signup"]
+type EmailKind = Literal["pending", "approved", "new_signup", "welcome"]
 type Item = dict[str, Any] | None
 
 
@@ -19,7 +19,7 @@ class Email:
 class EmailSettings:
     # The API's public URL, for the admin's approve and reject calls when there's no admin page.
     api_url: str
-    # Where sign-ups are sent for approval; without it only customers are emailed.
+    # Where sign-ups are sent; without it only customers are emailed.
     admin_email: str | None = None
     # ledger-ui's admin page, where the admin approves or rejects sign-ups from a browser.
     admin_page_url: str | None = None
@@ -29,8 +29,9 @@ def emails_for(before: Item, after: Item, settings: EmailSettings) -> list[Email
     """
     The emails a change to a Users-table item calls for. A customer who has just registered hears
     they're waiting for approval, and the admin is asked to approve or reject them; the customer
-    hears again when first enabled. Re-enabling a disabled customer sends nothing, and customers
-    without an email are never written to.
+    hears again when first enabled. Someone new through Google starts active, so they're welcomed,
+    and the admin only hears they've joined, in case they need disabling. Re-enabling a disabled
+    customer sends nothing, and customers without an email are never written to.
     """
     if not after or after.get("sk") != "PROFILE" or after.get("role") != "customer":
         return []
@@ -81,6 +82,39 @@ def emails_for(before: Item, after: Item, settings: EmailSettings) -> list[Email
                         "to approve it.\n\n"
                         "We'll email you again as soon as you can sign in.\n"
                     ),
+                )
+            )
+    if not before and after.get("status") == "active" and after.get("authProvider") == "google":
+        if settings.admin_email:
+            user = f"{settings.api_url}/api/v1/admin/users/{user_id}"
+            disable = (
+                f"To stop them, disable them on the admin page, under Active:\n\n  {settings.admin_page_url}\n"
+                if settings.admin_page_url
+                else f"To stop them, as an admin:\n\n  Disable:  POST {user}/disable\n"
+            )
+            emails.append(
+                Email(
+                    kind="new_signup",
+                    user_id=user_id,
+                    to=settings.admin_email,
+                    subject=f"New Ledger user: {username} joined with Google",
+                    text=(
+                        f"{username} has joined Ledger with Google. They don't need approval.\n\n"
+                        f"  Username: {username}\n"
+                        f"  Email:    {customer_email or '(none)'}\n"
+                        f"  User ID:  {user_id}\n\n"
+                        f"{disable}"
+                    ),
+                )
+            )
+        if customer_email:
+            emails.append(
+                Email(
+                    kind="welcome",
+                    user_id=user_id,
+                    to=customer_email,
+                    subject="Welcome to Ledger",
+                    text=f"Hi {username},\n\nYour Ledger account is ready. Next time, just {sign_in}.\n",
                 )
             )
     if before and before.get("status") == "pending" and after.get("status") == "active" and customer_email:
