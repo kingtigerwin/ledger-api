@@ -7,7 +7,7 @@ STATUSES: tuple[UserStatus, ...] = get_args(UserStatus.__value__)
 
 
 def _status_query(event: Event) -> UserStatus:
-    """The `status` query parameter, refused in zod's issue shape (as src/admin/schemas.ts) when it isn't one."""
+    """The `status` query parameter, refused in zod's issue shape (as the TypeScript Lambda did) when it isn't one."""
     query: dict[str, str] = event.get("queryStringParameters") or {}
     status = query.get("status")
     if status not in STATUSES:

@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import { Arn, CfnOutput, CustomResource, Duration, Stack, type StackProps } from "aws-cdk-lib";
 import { CfnStage, HttpApi, HttpMethod, HttpStage } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaAuthorizer, HttpLambdaResponseType } from "aws-cdk-lib/aws-apigatewayv2-authorizers";
@@ -19,7 +18,6 @@ import { AttributeType, Billing, StreamViewType, TableV2 } from "aws-cdk-lib/aws
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Architecture, FilterCriteria, FilterRule, Function as LambdaFunction, type FunctionProps, type IFunction, LoggingFormat, Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
 import { DynamoEventSource, SqsDlq } from "aws-cdk-lib/aws-lambda-event-sources";
-import { NodejsFunction, type NodejsFunctionProps } from "aws-cdk-lib/aws-lambda-nodejs";
 import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
@@ -87,20 +85,7 @@ export class LedgerStack extends Stack {
 
     const parameterArn = (name: string) =>
       Arn.format({ service: "ssm", resource: "parameter", resourceName: name.slice(1) }, this);
-    const makeFunction = (name: string, entry: string, props: Partial<NodejsFunctionProps> = {}) => {
-      const fn = new NodejsFunction(this, `${name}Function`, {
-        entry: path.join(__dirname, "../src", entry),
-        runtime: Runtime.NODEJS_22_X,
-        architecture: Architecture.ARM_64,
-        timeout: Duration.seconds(10),
-        loggingFormat: LoggingFormat.JSON,
-        logGroup: new LogGroup(this, `${name}Logs`, { retention: RetentionDays.TWO_WEEKS }),
-        bundling: { minify: true, sourceMap: true },
-        ...props,
-      });
-      return fn;
-    };
-    // The Lambdas moving to Python, from one bundle, or for MCP one with the SDK too (lib/python-code.ts).
+    // Every Lambda is Python, from one bundle, or for MCP one with the SDK too (lib/python-code.ts).
     const makePythonFunction = (name: string, module: string, props: Partial<FunctionProps> = {}) =>
       new LambdaFunction(this, `${name}Function`, {
         code: pythonCode({ withMcp: module === "mcp" }),
@@ -173,7 +158,7 @@ export class LedgerStack extends Stack {
     usersTable.grantReadData(mcpFunction);
     canReadSigningSecret(mcpFunction);
 
-    const docsFunction = makeFunction("Docs", "docs/lambda.ts", { memorySize: 128 });
+    const docsFunction = makePythonFunction("Docs", "docs", { memorySize: 128 });
 
     const api = new HttpApi(this, "Api", { createDefaultStage: false });
     const auth = new HttpLambdaIntegration("AuthIntegration", authFunction);

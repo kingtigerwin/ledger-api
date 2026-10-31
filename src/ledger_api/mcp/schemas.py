@@ -18,7 +18,7 @@ class TransactionChange(TransactionEdit, total=False):
 
 
 class ListAllQuery(ListQuery):
-    # As usernames are registered (src/auth/schemas.ts): stored lower-case, so matched in any case.
+    # As usernames are registered (ledger_api.auth.schemas): stored lower-case, so matched in any case.
     username: NotRequired[
         Annotated[
             StrictStr,

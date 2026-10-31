@@ -1,4 +1,4 @@
-"""The transaction request schemas, matching src/data/transaction-schema.ts (which the OpenAPI spec is built from)."""
+"""The transaction request schemas; the OpenAPI spec (ledger_api.docs) is built from them too."""
 
 import re
 from datetime import date
@@ -24,8 +24,11 @@ def _iso_date(value: str) -> str:
     return value
 
 
+MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+
+
 def _month(value: str) -> str:
-    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", value):
+    if not re.fullmatch(MONTH_PATTERN, value):
         raise ValueError("Must be YYYY-MM")
     return value
 
@@ -73,6 +76,8 @@ class TransactionEdit(TypedDict, total=False):
     note: Note
 
 
+DEFAULT_LIMIT = 50
+
 # TypedDict, not a model: "from" is a keyword in Python but a key here.
 ListQuery = TypedDict(
     "ListQuery",
@@ -80,16 +85,16 @@ ListQuery = TypedDict(
         "from": NotRequired[IsoDate],
         "to": NotRequired[IsoDate],
         "category": NotRequired[Category],
-        # Query strings are text, so the page size is read as a number (z.coerce in TypeScript).
-        "limit": NotRequired[Annotated[int, Field(ge=1, le=100)]],
+        # Query strings are text, so the page size is read as a number, not only taken as one.
+        "limit": NotRequired[Annotated[int, Field(ge=1, le=100, json_schema_extra={"default": DEFAULT_LIMIT})]],
         "cursor": NotRequired[StrictStr],
     },
 )
-DEFAULT_LIMIT = 50
 
 
 class SummaryQuery(TypedDict):
-    month: Annotated[StrictStr, AfterValidator(_month)]
+    # Checked in _month, for its message; the pattern is for the OpenAPI spec and MCP clients.
+    month: Annotated[StrictStr, AfterValidator(_month), Field(json_schema_extra={"pattern": MONTH_PATTERN})]
 
 
 class Transaction(NewTransaction):

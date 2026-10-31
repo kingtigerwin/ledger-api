@@ -40,6 +40,7 @@ describe("LedgerStack", () => {
     ["Authorizer", "authorizer", 256],
     // Hashes the admin's password with scrypt.
     ["Bootstrap", "bootstrap", 512],
+    ["Docs", "docs", 128],
   ])("runs the %s function from Python", (name, module, memory) => {
     const [fn] = Object.entries(template.findResources("AWS::Lambda::Function")).filter(([id]) =>
       id.startsWith(`${name}Function`),
@@ -53,11 +54,11 @@ describe("LedgerStack", () => {
     });
   });
 
-  it("has no Node.js functions but the docs and CDK's own", () => {
+  it("has no Node.js functions but CDK's own", () => {
     const node = Object.entries(template.findResources("AWS::Lambda::Function"))
       .filter(([, fn]) => String(fn.Properties.Runtime).startsWith("nodejs"))
       .map(([id]) => id.replace(/[0-9A-F]{8}$/, ""));
-    expect(node.filter((id) => !id.startsWith("BootstrapProviderframework")).sort()).toEqual(["DocsFunction"]);
+    expect(node.filter((id) => !id.startsWith("BootstrapProviderframework"))).toEqual([]);
   });
 
   it("throttles the API, and the auth routes more tightly", () => {

@@ -21,6 +21,7 @@ from ledger_api.data.schemas import (
 )
 from ledger_api.data.ulid import new_ulid
 from ledger_api.http import ApiError, AuthContext, Event, Handler, Response, auth_context, issues, with_errors
+from ledger_api.json_schema import inline_defs
 from ledger_api.log import log
 from ledger_api.mcp.schemas import BY_ID, LIST_ALL_QUERY, TRANSACTION_CHANGE, ById, ListAllQuery, TransactionChange
 from ledger_api.mcp.transport import serve
@@ -50,26 +51,9 @@ class _Tool[T]:
             name=self.name,
             title=self.title,
             description=self.description,
-            input_schema=_inline(self.schema.json_schema()),
+            input_schema=inline_defs(self.schema.json_schema()),
             annotations=self.annotations,
         )
-
-
-def _inline(schema: dict[str, Any]) -> dict[str, Any]:
-    """pydantic puts named types under `$defs`; MCP clients read a tool's schema more reliably with them in place."""
-    defs: dict[str, Any] = schema.pop("$defs", {})
-
-    def resolve(node: Any) -> Any:
-        if isinstance(node, dict):
-            fields = cast(dict[str, Any], node)
-            if "$ref" in fields:
-                return resolve(defs[str(fields["$ref"]).removeprefix("#/$defs/")])
-            return {key: resolve(value) for key, value in fields.items()}
-        if isinstance(node, list):
-            return [resolve(item) for item in cast(list[Any], node)]
-        return node
-
-    return {key: resolve(value) for key, value in schema.items() if key not in ("title", "description")}
 
 
 def _list_query(query: ListAllQuery) -> ListQuery:
