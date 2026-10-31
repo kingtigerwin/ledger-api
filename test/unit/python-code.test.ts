@@ -44,13 +44,16 @@ describe("given the Python functions' code", () => {
     );
   }, 120_000);
 
-  it("is built for Notify, Admin, Data and Mcp", () => {
-    expect([...files.keys()].map((id) => id.replace(/Function.*/, "")).sort()).toEqual(["Admin", "Data", "Mcp", "Notify"]);
+  it("is built for every Python function", () => {
+    expect([...files.keys()].map((id) => id.replace(/Function.*/, "")).sort()).toEqual([
+      "Admin", "Auth", "Authorizer", "Bootstrap", "Data", "Mcp", "Notify",
+    ]);
   });
 
-  it("uploads one bundle for Notify, Admin and Data, and another for Mcp", () => {
-    const key = (name: string) => keys.get([...keys.keys()].find((id) => id.startsWith(name))!);
-    expect(new Set([key("Notify"), key("Admin"), key("Data")]).size).toBe(1);
+  it("uploads one bundle for all but Mcp, and another for Mcp", () => {
+    const key = (name: string) => keys.get([...keys.keys()].find((id) => id.startsWith(`${name}Function`))!);
+    const lean = ["Notify", "Admin", "Data", "Auth", "Authorizer", "Bootstrap"].map(key);
+    expect(new Set(lean).size).toBe(1);
     expect(key("Mcp")).not.toEqual(key("Data"));
   });
 

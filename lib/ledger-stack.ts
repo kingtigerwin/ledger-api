@@ -117,7 +117,7 @@ export class LedgerStack extends Stack {
         new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [parameterArn(SIGNING_SECRET_PARAM)] }),
       );
 
-    const authFunction = makeFunction("Auth", "auth/lambda.ts", {
+    const authFunction = makePythonFunction("Auth", "auth", {
       // scrypt needs about 128 MB per hash; more memory also means more CPU, so hashing is faster.
       memorySize: 512,
       environment: { USERS_TABLE: usersTable.tableName },
@@ -125,7 +125,7 @@ export class LedgerStack extends Stack {
     usersTable.grantReadWriteData(authFunction);
     canReadSigningSecret(authFunction);
 
-    const authorizerFunction = makeFunction("Authorizer", "auth/authorizer-lambda.ts", { memorySize: 256 });
+    const authorizerFunction = makePythonFunction("Authorizer", "authorizer", { memorySize: 256 });
     canReadSigningSecret(authorizerFunction);
     const authorizer = new HttpLambdaAuthorizer("BearerAuthorizer", authorizerFunction, {
       responseTypes: [HttpLambdaResponseType.SIMPLE],
@@ -134,7 +134,7 @@ export class LedgerStack extends Stack {
     });
 
     // Creates the signing secret, the admin password and the admin user on first deploy.
-    const bootstrapFunction = makeFunction("Bootstrap", "bootstrap/lambda.ts", {
+    const bootstrapFunction = makePythonFunction("Bootstrap", "bootstrap", {
       memorySize: 512, // hashes the admin password with scrypt
       timeout: Duration.seconds(30),
       environment: { USERS_TABLE: usersTable.tableName },
@@ -166,8 +166,7 @@ export class LedgerStack extends Stack {
     // MCP tools for agents: the Transactions routes again, acting as the caller. The signing secret is for list cursors;
     // the Users table, read-only, is for the usernames on the admin's cross-customer list.
     const mcpFunction = makePythonFunction("Mcp", "mcp", {
-      // Lambda's CPU scales with memory, and a cold start spends most of its time importing the MCP SDK.
-      memorySize: 512,
+      memorySize: 256,
       environment: { DATA_TABLE: dataTable.tableName, USERS_TABLE: usersTable.tableName },
     });
     dataTable.grantReadWriteData(mcpFunction);
