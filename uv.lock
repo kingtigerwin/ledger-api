@@ -369,6 +369,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "boto3-stubs", extra = ["dynamodb", "dynamodbstreams", "sesv2", "ssm"] },
+    { name = "httpx2" },
     { name = "mcp" },
     { name = "pyright" },
     { name = "pytest" },
@@ -388,6 +389,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "boto3-stubs", extras = ["dynamodb", "dynamodbstreams", "sesv2", "ssm"], specifier = ">=1.43.119" },
+    { name = "httpx2", specifier = ">=2.16.0" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.1.1" },
