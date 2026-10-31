@@ -57,6 +57,8 @@ _REFRESH_TTL = timedelta(seconds=REFRESH_TOKEN_TTL_SECONDS)
 # ledger-ui's pages; relative, so the browser stays on the host that's showing the app.
 _LANDING_PAGE = "/chat"
 _LOGIN_PAGE = "/login"
+# `via` tells the UI to offer Google again, not the password form this user has no password for.
+_GOOGLE_PENDING_PAGE = "/pending?via=google"
 
 
 @cache
@@ -186,7 +188,7 @@ def create_auth_handler(
         if user.status == "disabled":
             raise GoogleSignInError("account_disabled")
         if user.status == "pending":
-            return redirect(f"{_LOGIN_PAGE}?error=account_pending", [clear_attempt_cookie()])
+            return redirect(_GOOGLE_PENDING_PAGE, [clear_attempt_cookie()])
         # The UI's page load trades this cookie for an access token, as it does after any reload.
         return redirect(_LANDING_PAGE, [clear_attempt_cookie(), refresh_cookie(new_refresh_token(user, at))])
 

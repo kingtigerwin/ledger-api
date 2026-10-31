@@ -119,7 +119,7 @@ class TestCallback:
         ) -> None:
             res = sign_in(handler, google)
 
-            assert (res.status, res.location) == (302, "/login?error=account_pending")
+            assert (res.status, res.location) == (302, "/pending?via=google")
             assert not any(cookie.startswith("refreshToken=") for cookie in res.cookies)
             claim = item(table, "GOOGLE#1234567890", "GOOGLE")
             profile = item(table, f"USER#{claim['userId']}", "PROFILE")
@@ -173,7 +173,7 @@ class TestCallback:
 
             res = sign_in(handler, google)
 
-            assert res.location == "/login?error=account_pending"
+            assert res.location == "/pending?via=google"
             assert table.scan(Select="COUNT")["Count"] == 3
 
     class TestGivenADisabledGoogleUser:
@@ -195,7 +195,7 @@ class TestCallback:
 
             res = sign_in(handler, google)
 
-            assert res.location == "/login?error=account_pending"
+            assert res.location == "/pending?via=google"
             assert item(table, "GOOGLE#1234567890", "GOOGLE")["userId"] != existing["id"]
 
     class TestGivenTwoFirstSignInsAtOnce:
