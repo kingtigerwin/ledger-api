@@ -23,7 +23,7 @@ from ledger_api.data.handler import create_data_handler
 from ledger_api.data.ledger import Ledger
 from ledger_api.data.transactions_store import TransactionsStore
 from ledger_api.docs.handler import create_docs_handler
-from ledger_api.docs.openapi import OPERATIONS
+from ledger_api.docs.openapi import OPERATIONS, Operation
 from ledger_api.http import Handler
 from ledger_api.mcp.handler import create_mcp_handler
 from scripts.smoke import SmokeFailedError, run
@@ -69,14 +69,19 @@ def api_in_process(table: "Table", data_table: "Table", parameters: FakeParamete
         for op in OPERATIONS
     ]
 
+    def route(method: str, path: str) -> tuple[Operation, re.Match[str]] | None:
+        for route_method, pattern, op in routes:
+            match = pattern.match(path)
+            if route_method == method and match:
+                return op, match
+        return None
+
     def send(method: str, url: str, headers: dict[str, str], body: bytes | None) -> tuple[int, bytes]:
         parts = urlsplit(url)
-        for route_method, pattern, op in routes:
-            match = pattern.match(parts.path)
-            if route_method == method and match:
-                break
-        else:
+        found = route(method, parts.path)
+        if not found:
             return 404, b'{"message":"Not Found"}'
+        op, match = found
         lowered = {key.lower(): value for key, value in headers.items()}
         event: dict[str, Any] = {
             "routeKey": f"{method} {op.path}",
