@@ -127,12 +127,16 @@ export class LedgerStack extends Stack {
       );
     }
 
-    const authorizerFunction = makePythonFunction("Authorizer", "authorizer", { memorySize: 256 });
+    const authorizerFunction = makePythonFunction("Authorizer", "authorizer", {
+      memorySize: 256,
+      environment: { USERS_TABLE: usersTable.tableName },
+    });
     canReadSigningSecret(authorizerFunction);
+    usersTable.grantReadData(authorizerFunction);
     const authorizer = new HttpLambdaAuthorizer("BearerAuthorizer", authorizerFunction, {
       responseTypes: [HttpLambdaResponseType.SIMPLE],
-      // An expired token can keep working for at most this long after it expires.
-      resultsCacheTtl: Duration.seconds(60),
+      // No cache: each request checks the user is still active, so disabling or deleting them takes effect at once.
+      resultsCacheTtl: Duration.seconds(0),
     });
 
     // Creates the signing secret, the admin password and the admin user on first deploy.
@@ -154,9 +158,11 @@ export class LedgerStack extends Stack {
 
     const adminFunction = makePythonFunction("Admin", "admin", {
       memorySize: 256,
-      environment: { USERS_TABLE: usersTable.tableName },
+      environment: { USERS_TABLE: usersTable.tableName, DATA_TABLE: dataTable.tableName },
     });
     usersTable.grantReadWriteData(adminFunction);
+    // Deleting a user takes their transactions too.
+    dataTable.grantReadWriteData(adminFunction);
 
     const dataFunction = makePythonFunction("Data", "data", {
       memorySize: 256,
@@ -214,6 +220,7 @@ export class LedgerStack extends Stack {
     });
     const admin = new HttpLambdaIntegration("AdminIntegration", adminFunction);
     api.addRoutes({ path: "/api/v1/admin/users", methods: [HttpMethod.GET], integration: admin, authorizer });
+    api.addRoutes({ path: "/api/v1/admin/users/{id}", methods: [HttpMethod.DELETE], integration: admin, authorizer });
     for (const action of ["enable", "disable"]) {
       api.addRoutes({
         path: `/api/v1/admin/users/{id}/${action}`,

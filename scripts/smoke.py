@@ -143,6 +143,7 @@ def run(
     expect_status("monthly summary", api("GET", f"/transactions/summary?month={month}", token=token), 200)
     expect_status("unauthenticated request is refused", api("GET", "/transactions"), 401)
     expect_status("delete transaction", api("DELETE", f"/transactions/{txn['id']}", token=token), 204)
+    expect_status("a customer can't delete a user", api("DELETE", "/admin/users/nobody", token=token), 403)
 
     # The agent's path: the same customer token, over MCP.
     def tool(name: str, arguments: dict[str, Any]) -> Reply:

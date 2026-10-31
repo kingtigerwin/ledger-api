@@ -50,12 +50,12 @@ def api_in_process(table: "Table", data_table: "Table", parameters: FakeParamete
     auth = create_auth_handler(users=users, signing_secret=secret, now=now)
     handlers: dict[str, Handler] = {
         "auth": auth,
-        "admin": create_admin_handler(users=users),
+        "admin": create_admin_handler(users=users, transactions=TransactionsStore(data_table)),
         "data": create_data_handler(ledger=ledger),
         "mcp": create_mcp_handler(ledger=ledger, users=users, now=now),
         "docs": create_docs_handler(),
     }
-    authorize = create_authorizer(signing_secret=secret, now=now)
+    authorize = create_authorizer(signing_secret=secret, now=now, is_active=users.is_active)
 
     def area(path: str) -> str:
         if path.startswith("/api/v1/auth/"):

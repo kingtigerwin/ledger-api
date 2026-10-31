@@ -107,6 +107,23 @@ class TransactionsStore:
         self._table = table
         self._client = table.meta.client
 
+    def delete_all(self, user_id: str) -> int:
+        """Deletes everything in the user's partition and returns how many items that was; safe to run again."""
+        query: dict[str, Any] = {
+            "KeyConditionExpression": Key("pk").eq(_user_pk(user_id)),
+            "ProjectionExpression": "pk, sk",
+        }
+        deleted = 0
+        with self._table.batch_writer() as batch:
+            while True:
+                page = self._table.query(**query)
+                for key in page.get("Items", []):
+                    batch.delete_item(Key=key)
+                    deleted += 1
+                if "LastEvaluatedKey" not in page:
+                    return deleted
+                query["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
     def get(self, user_id: str, id: str) -> Transaction | None:
         ref = self._table.get_item(Key=_ref_key(user_id, id), ConsistentRead=True).get("Item")
         if not ref:
