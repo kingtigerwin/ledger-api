@@ -80,12 +80,16 @@ def parse_query[T](event: Event, schema: TypeAdapter[T]) -> T:
         raise ApiError(400, "validation_failed", "Query is invalid", issues(err)) from None
 
 
-def json_response(status: int, body: Any) -> Response:
-    return {"statusCode": status, "headers": {"content-type": "application/json"}, "body": json.dumps(body)}
+def json_response(status: int, body: Any, cookies: list[str] | None = None) -> Response:
+    """`cookies` are Set-Cookie values; the HTTP API's payload v2 sends each as its own header."""
+    res: Response = {"statusCode": status, "headers": {"content-type": "application/json"}, "body": json.dumps(body)}
+    if cookies:
+        res["cookies"] = cookies
+    return res
 
 
-def no_content() -> Response:
-    return {"statusCode": 204}
+def no_content(cookies: list[str] | None = None) -> Response:
+    return {"statusCode": 204, "cookies": cookies} if cookies else {"statusCode": 204}
 
 
 def with_errors(handler: Handler) -> Handler:

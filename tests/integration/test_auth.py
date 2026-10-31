@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from ledger_api.auth.handler import create_auth_handler
-from ledger_api.auth.tokens import verify_access_token
+from ledger_api.auth.tokens import AccessClaims, verify_access_token
 from ledger_api.auth.users_store import UsersStore
 from ledger_api.http import Handler
 from ledger_api.log import Level, LogEntry
@@ -23,7 +23,7 @@ def handler(table: "Table") -> Handler:
     return create_auth_handler(users=UsersStore(table), signing_secret=SECRET, now=lambda: datetime.now(UTC))
 
 
-def claims_of(body: Any):
+def claims_of(body: Any) -> AccessClaims:
     return verify_access_token(body["accessToken"], SECRET, datetime.now(UTC))
 
 
@@ -44,10 +44,10 @@ class TestRegister:
                 "createdAt": res.body["createdAt"],
             }
             # As the TypeScript Lambda wrote it, so the two read each other's users.
-            profile = table.get_item(Key={"pk": f"USER#{res.body['id']}", "sk": "PROFILE"})["Item"]
+            profile = table.get_item(Key={"pk": f"USER#{res.body['id']}", "sk": "PROFILE"}).get("Item", {})
             assert str(profile["passwordHash"]).startswith("scrypt$131072$8$1$")
             assert str(profile["createdAt"]).endswith("Z")
-            claim = table.get_item(Key={"pk": "USERNAME#alice", "sk": "USERNAME"})["Item"]
+            claim = table.get_item(Key={"pk": "USERNAME#alice", "sk": "USERNAME"}).get("Item", {})
             assert claim["userId"] == res.body["id"]
 
     class TestGivenAUsernameThatExistsInDifferentLetterCase:

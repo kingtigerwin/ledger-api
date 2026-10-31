@@ -1,12 +1,19 @@
-"""The Users table, as src/auth/users-store.ts reads and writes it (see src/auth/users-table.ts)."""
+"""The Users table, keyed as src/auth/users-table.ts defines (and the stack builds the table)."""
 
+import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
 from boto3.dynamodb.conditions import Attr, Key
 
+from ledger_api.timestamps import iso_timestamp
+
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
+
+MAX_FAILED_LOGINS = 5
+LOCKOUT = timedelta(minutes=15)
 
 type Role = Literal["admin", "customer"]
 type UserStatus = Literal["pending", "active", "disabled"]
@@ -30,12 +37,50 @@ class User:
         return body | {"role": self.role, "status": self.status, "createdAt": self.created_at}
 
 
+@dataclass(frozen=True)
+class StoredCredentials:
+    """What a login checks: the user, their password hash and their lockout state."""
+
+    user: User
+    password_hash: str
+    failed_logins: int
+    locked_until: datetime | None
+
+
 class UserNotFoundError(Exception):
     pass
 
 
+class UsernameTakenError(Exception):
+    pass
+
+
+class InvalidRefreshTokenError(Exception):
+    def __init__(self, *, reused: bool) -> None:
+        super().__init__("Refresh token reused" if reused else "Unknown refresh token")
+        # True when the token existed but had already been replaced: a sign it was copied.
+        self.reused = reused
+
+
 def _profile_key(user_id: str) -> dict[str, str]:
     return {"pk": f"USER#{user_id}", "sk": "PROFILE"}
+
+
+def _username_key(username: str) -> dict[str, str]:
+    return {"pk": f"USERNAME#{username}", "sk": "USERNAME"}
+
+
+def _refresh_token_key(user_id: str, token_hash: str) -> dict[str, str]:
+    return {"pk": f"USER#{user_id}", "sk": f"REFRESH#{token_hash}"}
+
+
+def _refresh_token_item(user_id: str, token_hash: str, expires_at: datetime) -> dict[str, Any]:
+    # `ttl` (epoch seconds) lets DynamoDB delete expired tokens for free.
+    return {
+        **_refresh_token_key(user_id, token_hash),
+        "expiresAt": iso_timestamp(expires_at),
+        "ttl": int(expires_at.timestamp()),
+    }
 
 
 def _user(item: dict[str, Any]) -> User:
@@ -75,8 +120,82 @@ class UsersStore:
 
     def user_id_for(self, username: str) -> str | None:
         """The ID behind a username, from its claim item; usernames are stored lower-case."""
-        item = self._table.get_item(Key={"pk": f"USERNAME#{username}", "sk": "USERNAME"}).get("Item")
+        item = self._table.get_item(Key=_username_key(username)).get("Item")
         return str(item["userId"]) if item else None
+
+    def create(
+        self, *, username: str, password_hash: str, role: Role, status: UserStatus, now: datetime, email: str | None
+    ) -> User:
+        """Creates the user and claims the username in one transaction, so two users can never share a name."""
+        user = User(
+            id=str(uuid.uuid4()),
+            username=username,
+            role=role,
+            status=status,
+            created_at=iso_timestamp(now),
+            email=email,
+        )
+        name = self._table.name
+        # The resource's own client: it takes plain values, as the Table does, not DynamoDB's typed ones.
+        client = self._table.meta.client
+        try:
+            client.transact_write_items(
+                TransactItems=[
+                    {
+                        "Put": {
+                            "TableName": name,
+                            "Item": {**_username_key(username), "userId": user.id},
+                            "ConditionExpression": "attribute_not_exists(pk)",
+                        }
+                    },
+                    {
+                        "Put": {
+                            "TableName": name,
+                            "Item": {**_profile_key(user.id), **user.as_json(), "passwordHash": password_hash},
+                        }
+                    },
+                ]
+            )
+        except client.exceptions.TransactionCanceledException:
+            raise UsernameTakenError(username) from None
+        return user
+
+    def find_by_username(self, username: str) -> StoredCredentials | None:
+        claim = self._table.get_item(Key=_username_key(username), ConsistentRead=True).get("Item")
+        if not claim:
+            return None
+        item = self._table.get_item(Key=_profile_key(str(claim["userId"])), ConsistentRead=True).get("Item")
+        if not item:
+            return None
+        locked_until = item.get("lockedUntil")
+        return StoredCredentials(
+            user=_user(item),
+            password_hash=str(item["passwordHash"]),
+            failed_logins=int(str(item.get("failedLogins", 0))),
+            locked_until=datetime.fromisoformat(str(locked_until)) if locked_until else None,
+        )
+
+    def record_failed_login(self, user_id: str, now: datetime) -> None:
+        """Counts a failed login; the fifth in a row locks the user for 15 minutes and starts the count again."""
+        res = self._table.update_item(
+            Key=_profile_key(user_id),
+            UpdateExpression="ADD failedLogins :one",
+            ExpressionAttributeValues={":one": 1},
+            ReturnValues="UPDATED_NEW",
+        )
+        if int(str(res.get("Attributes", {}).get("failedLogins", 0))) >= MAX_FAILED_LOGINS:
+            self._table.update_item(
+                Key=_profile_key(user_id),
+                UpdateExpression="SET failedLogins = :zero, lockedUntil = :until",
+                ExpressionAttributeValues={":zero": 0, ":until": iso_timestamp(now + LOCKOUT)},
+            )
+
+    def clear_failed_logins(self, user_id: str) -> None:
+        self._table.update_item(
+            Key=_profile_key(user_id),
+            UpdateExpression="SET failedLogins = :zero REMOVE lockedUntil",
+            ExpressionAttributeValues={":zero": 0},
+        )
 
     def usernames(self, user_ids: list[str]) -> dict[str, str]:
         """Usernames by user ID; IDs with no profile are left out. BatchGet takes at most 100 keys a call."""
@@ -108,6 +227,42 @@ class UsersStore:
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:
             raise UserNotFoundError(user_id) from None
         return _user(res["Attributes"])
+
+    def save_refresh_token(self, user_id: str, token_hash: str, expires_at: datetime) -> None:
+        self._table.put_item(Item=_refresh_token_item(user_id, token_hash, expires_at))
+
+    def rotate_refresh_token(
+        self, user_id: str, old_hash: str, new_hash: str, *, now: datetime, expires_at: datetime
+    ) -> None:
+        """
+        Marks the old token as replaced and stores the new one. Raises InvalidRefreshTokenError if the old
+        token is unknown, expired or already replaced.
+        """
+        name = self._table.name
+        client = self._table.meta.client
+        try:
+            client.transact_write_items(
+                TransactItems=[
+                    {
+                        "Update": {
+                            "TableName": name,
+                            "Key": _refresh_token_key(user_id, old_hash),
+                            "UpdateExpression": "SET replacedAt = :now",
+                            "ConditionExpression": (
+                                "attribute_exists(pk) AND attribute_not_exists(replacedAt) AND expiresAt > :now"
+                            ),
+                            "ExpressionAttributeValues": {":now": iso_timestamp(now)},
+                        }
+                    },
+                    {"Put": {"TableName": name, "Item": _refresh_token_item(user_id, new_hash, expires_at)}},
+                ]
+            )
+        except client.exceptions.TransactionCanceledException:
+            old = self._table.get_item(Key=_refresh_token_key(user_id, old_hash), ConsistentRead=True).get("Item")
+            raise InvalidRefreshTokenError(reused=bool(old and old.get("replacedAt"))) from None
+
+    def delete_refresh_token(self, user_id: str, token_hash: str) -> None:
+        self._table.delete_item(Key=_refresh_token_key(user_id, token_hash))
 
     def revoke_refresh_tokens(self, user_id: str) -> None:
         """Deletes every refresh token the user has, logging them out everywhere within one access-token lifetime."""

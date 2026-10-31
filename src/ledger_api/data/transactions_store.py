@@ -1,12 +1,13 @@
 """The Data table's transactions, keyed as src/data/data-table.ts defines (and the stack builds the table)."""
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from boto3.dynamodb.conditions import Attr, Key
 
 from ledger_api.data.schemas import NewTransaction, Transaction, TransactionEdit
+from ledger_api.timestamps import iso_timestamp
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
@@ -22,11 +23,6 @@ class VersionConflictError(Exception):
 
 class TransactionExistsError(Exception):
     """The ID was already used: the request is a retry (or a client bug), not a new transaction."""
-
-
-def iso_timestamp(at: datetime) -> str:
-    """As JavaScript's toISOString() writes it (milliseconds, Z), so old and new rows read and sort the same."""
-    return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.") + f"{at.microsecond // 1000:03d}Z"
 
 
 # Sort keys are `<date>#<id>`, so a date range is a key range: from the start of `from` to the end

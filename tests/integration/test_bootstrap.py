@@ -64,12 +64,12 @@ class TestBootstrap:
             users = UsersStore(table)
             bootstrap(users=users, parameters=parameters, now=lambda: datetime.now(UTC))
             before = dict(parameters.values)
-            admin = table.get_item(Key={"pk": f"USERNAME#{ADMIN_USERNAME}", "sk": "USERNAME"})["Item"]
+            admin = table.get_item(Key={"pk": f"USERNAME#{ADMIN_USERNAME}", "sk": "USERNAME"}).get("Item")
 
             bootstrap(users=users, parameters=parameters, now=lambda: datetime.now(UTC))
 
             assert parameters.values == before
-            assert table.get_item(Key={"pk": f"USERNAME#{ADMIN_USERNAME}", "sk": "USERNAME"})["Item"] == admin
+            assert table.get_item(Key={"pk": f"USERNAME#{ADMIN_USERNAME}", "sk": "USERNAME"}).get("Item") == admin
             assert login_as_admin(table, parameters).status == 200
 
 
