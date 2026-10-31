@@ -1,4 +1,4 @@
-"""The Users table, keyed as src/auth/users-table.ts defines (and the stack builds the table)."""
+"""The Users table, keyed as infra/tables.py describes (and the stack builds the table)."""
 
 import uuid
 from dataclasses import dataclass

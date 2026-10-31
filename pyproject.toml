@@ -1,9 +1,9 @@
 [project]
 name = "ledger-api"
 version = "0.1.0"
-description = "The Python Lambdas of ledger-api, moving over from TypeScript one at a time"
+description = "A serverless API where customers record their spending"
 requires-python = ">=3.13"
-# boto3 comes with the Lambda runtime; the rest is bundled for arm64 Linux at synth (lib/python-code.ts).
+# boto3 comes with the Lambda runtime; the rest is bundled for arm64 Linux at synth (infra/python_code.py).
 dependencies = [
     "boto3>=1.43.119",
     "pydantic>=2.14.1",
@@ -25,6 +25,13 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.17.3",
 ]
+infra = [
+    "aws-cdk-lib>=2.274.0",
+    "constructs>=10.8.1",
+]
+
+[tool.uv]
+default-groups = ["dev", "infra"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -32,13 +39,13 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 120
 target-version = "py313"
-include = ["src/**/*.py", "tests/**/*.py", "scripts/**/*.py"]
+include = ["src/**/*.py", "tests/**/*.py", "scripts/**/*.py", "infra/**/*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.pyright]
-include = ["src", "tests", "scripts"]
+include = ["src", "tests", "scripts", "infra"]
 exclude = ["**/node_modules", "**/__pycache__", "cdk.out"]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
