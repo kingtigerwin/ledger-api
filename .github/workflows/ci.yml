@@ -15,17 +15,12 @@ jobs:
           - 8000:8000
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # tests/infra synthesizes the stacks, and CDK's jsii runs on Node.
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-          cache: npm
-      # Before the unit tests: one of them bundles the Python Lambdas, which runs uv.
-      - uses: astral-sh/setup-uv@v6
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run test:unit
-      # Every Lambda but the docs; the integration tests use the DynamoDB Local service above.
+      # The integration tests use the DynamoDB Local service above.
       - run: uv sync --locked
       - run: uv run ruff check
       - run: uv run ruff format --check
@@ -56,10 +51,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
-      # cdk bundles the Python Lambdas with uv (lib/python-code.ts).
+      # cdk bundles the Lambdas with uv (infra/python_code.py).
       - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
@@ -67,7 +61,7 @@ jobs:
           # Also hides the account ID wherever later steps print it (e.g. ARNs in cdk output).
           mask-aws-account-id: true
       - name: Deploy
-        run: npx cdk deploy LedgerApi --require-approval never -c alarmEmail="$ALARM_EMAIL" -c adminEmail="$ADMIN_EMAIL" --outputs-file cdk-outputs.json
+        run: npx --yes aws-cdk@2.1146.1 deploy LedgerApi --require-approval never -c alarmEmail="$ALARM_EMAIL" -c adminEmail="$ADMIN_EMAIL" --outputs-file cdk-outputs.json
         env:
           ALARM_EMAIL: ${{ vars.ALARM_EMAIL }}
           ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}

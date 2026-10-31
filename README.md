@@ -1,19 +1,14 @@
 # ledger-api
 
-A serverless API where customers record their spending: Python Lambdas, AWS CDK in TypeScript, API Gateway (HTTP API) behind CloudFront, and DynamoDB. Designed to run at $0/month. The design is in [`docs/design.md`](docs/design.md), and the API is described by the OpenAPI spec served at `/api/openapi.json`.
+A serverless API where customers record their spending: Python Lambdas, AWS CDK in Python, API Gateway (HTTP API) behind CloudFront, and DynamoDB. Designed to run at $0/month. The design is in [`docs/design.md`](docs/design.md), and the API is described by the OpenAPI spec served at `/api/openapi.json`.
 
 ## Develop
 
 ```sh
-npm ci
-npm run typecheck && npm run lint
-npm test                  # the CDK stack, the OpenAPI spec and the Python bundles
-
-# Every Lambda but docs is Python; needs uv, also for cdk synth/deploy
-npm run db:up             # DynamoDB Local in Docker, for the integration tests
+docker compose up -d dynamodb-local   # DynamoDB Local, for the integration tests
 uv sync
 uv run ruff check && uv run ruff format --check && uv run pyright
-uv run pytest             # unit + integration
+uv run pytest             # unit, integration, and the CDK stacks and bundles (needs Node for CDK's jsii)
 ```
 
 ## First deploy (once, from your machine)
@@ -23,9 +18,9 @@ GitHub Actions deploys `main` using GitHub's OIDC login, so no AWS keys are stor
 1. With AWS credentials for the target account in your shell:
 
    ```sh
-   npx cdk bootstrap aws://<account-id>/ap-southeast-2
-   npx cdk bootstrap aws://<account-id>/us-east-1   # only with a custom domain: its certificate must live there
-   npx cdk deploy LedgerApiCiAccess
+   npx aws-cdk@2.1146.1 bootstrap aws://<account-id>/ap-southeast-2
+   npx aws-cdk@2.1146.1 bootstrap aws://<account-id>/us-east-1   # only with a custom domain: its certificate must live there
+   npx aws-cdk@2.1146.1 deploy LedgerApiCiAccess
    ```
 
    Note the `DeployRoleArn` output.
