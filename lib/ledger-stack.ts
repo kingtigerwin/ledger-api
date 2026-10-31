@@ -31,10 +31,11 @@ import type { Construct } from "constructs";
 import type { CustomDomain } from "./certificate-stack";
 import { pythonCode } from "./python-code";
 import { usersTableKeys } from "../src/auth/users-table";
-import { ADMIN_PASSWORD_PARAM, SIGNING_SECRET_PARAM } from "../src/config";
+import { ADMIN_PASSWORD_PARAM, GOOGLE_CLIENT_SECRET_PARAM, SIGNING_SECRET_PARAM } from "../src/config";
 import { dataTableKeys } from "../src/data/data-table";
 // Unauthenticated routes that anyone on the internet can call, so they get tighter throttling.
 const PUBLIC_AUTH_ROUTES = ["register", "login", "refresh", "logout"].map((name) => `/api/v1/auth/${name}`);
+const GOOGLE_AUTH_ROUTES = ["start", "callback"].map((name) => `/api/v1/auth/google/${name}`);
 
 export interface LedgerStackProps extends StackProps {
   /** Serve the API on this name as well as the CloudFront domain; the certificate comes from CertificateStack. */
@@ -48,6 +49,11 @@ export interface LedgerStackProps extends StackProps {
   adminEmail?: string;
   /** ledger-ui's admin page, linked from the admin's sign-up email. Without it the email gives the API calls. */
   adminPageUrl?: string;
+  /**
+   * Sign-in with Google. The client ID is public; its secret goes in SSM by hand (see README). Without this the
+   * routes still exist, and send the browser back to the login page.
+   */
+  googleSignIn?: { clientId: string; redirectUri: string };
 }
 
 export class LedgerStack extends Stack {
@@ -56,6 +62,7 @@ export class LedgerStack extends Stack {
 
     const customDomain = props?.customDomain;
     const emailFrom = props?.emailFrom;
+    const googleSignIn = props?.googleSignIn;
     if (emailFrom && !customDomain) {
       throw new Error("emailFrom needs customDomain: SES verifies the sender's domain through its hosted zone");
     }
@@ -105,10 +112,20 @@ export class LedgerStack extends Stack {
     const authFunction = makePythonFunction("Auth", "auth", {
       // scrypt needs about 128 MB per hash; more memory also means more CPU, so hashing is faster.
       memorySize: 512,
-      environment: { USERS_TABLE: usersTable.tableName },
+      environment: {
+        USERS_TABLE: usersTable.tableName,
+        ...(googleSignIn
+          ? { GOOGLE_CLIENT_ID: googleSignIn.clientId, GOOGLE_REDIRECT_URI: googleSignIn.redirectUri }
+          : {}),
+      },
     });
     usersTable.grantReadWriteData(authFunction);
     canReadSigningSecret(authFunction);
+    if (googleSignIn) {
+      authFunction.addToRolePolicy(
+        new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [parameterArn(GOOGLE_CLIENT_SECRET_PARAM)] }),
+      );
+    }
 
     const authorizerFunction = makePythonFunction("Authorizer", "authorizer", { memorySize: 256 });
     canReadSigningSecret(authorizerFunction);
@@ -162,9 +179,14 @@ export class LedgerStack extends Stack {
 
     const api = new HttpApi(this, "Api", { createDefaultStage: false });
     const auth = new HttpLambdaIntegration("AuthIntegration", authFunction);
-    const publicRoutes = PUBLIC_AUTH_ROUTES.flatMap((routePath) =>
-      api.addRoutes({ path: routePath, methods: [HttpMethod.POST], integration: auth }),
-    );
+    const publicRoutes = [
+      ...PUBLIC_AUTH_ROUTES.flatMap((routePath) =>
+        api.addRoutes({ path: routePath, methods: [HttpMethod.POST], integration: auth }),
+      ),
+      ...GOOGLE_AUTH_ROUTES.flatMap((routePath) =>
+        api.addRoutes({ path: routePath, methods: [HttpMethod.GET], integration: auth }),
+      ),
+    ];
     api.addRoutes({ path: "/api/v1/auth/me", methods: [HttpMethod.GET], integration: auth, authorizer });
     api.addRoutes({
       path: "/api/openapi.json",
@@ -209,8 +231,12 @@ export class LedgerStack extends Stack {
     });
     // RouteSettings is untyped JSON, so CDK passes keys through as written: they must be PascalCase.
     // Per-route limits refer to routes by key, so the routes must exist before the stage.
+    const publicRouteKeys = [
+      ...PUBLIC_AUTH_ROUTES.map((routePath) => `POST ${routePath}`),
+      ...GOOGLE_AUTH_ROUTES.map((routePath) => `GET ${routePath}`),
+    ];
     (stage.node.defaultChild as CfnStage).routeSettings = Object.fromEntries(
-      PUBLIC_AUTH_ROUTES.map((routePath) => [`POST ${routePath}`, { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 }]),
+      publicRouteKeys.map((routeKey) => [routeKey, { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 }]),
     );
     publicRoutes.forEach((route) => stage.node.addDependency(route));
     // Don't serve traffic before the signing secret exists.

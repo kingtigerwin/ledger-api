@@ -30,7 +30,7 @@ Deploys: `LedgerApi` is deployed by the `deploy` job in `.github/workflows/ci.ym
 
 CDK stacks (`bin/app.ts`): `LedgerApi` (`lib/ledger-stack.ts`, the app), `LedgerApiCertificate` (`lib/certificate-stack.ts`, the custom domain's ACM certificate in us-east-1, only when `customDomain` is set in `cdk.json`) and `LedgerApiCiAccess` (`lib/ci-access-stack.ts`, GitHub OIDC deploy role). CloudFront → HTTP API → one Lambda per area, each a thin `lambda_function.py` that wires real dependencies into a testable `create_…_handler(...)` in `handler.py`:
 
-- `src/ledger_api/auth/`: register, login, refresh, logout, me (Users table), plus what the other areas share about users: `users_store.py` (every Users table read and write), `tokens.py` (HS256 access tokens, PyJWT), `password.py` (scrypt, `hashlib`), `refresh_tokens.py`. The formats match what the TypeScript Lambdas stored and issued; `tests/unit/test_password.py` and `test_tokens.py` check them against vectors from it.
+- `src/ledger_api/auth/`: register, login, sign-in with Google (`google.py`), refresh, logout, me (Users table), plus what the other areas share about users: `users_store.py` (every Users table read and write), `tokens.py` (HS256 access tokens, PyJWT), `password.py` (scrypt, `hashlib`), `refresh_tokens.py`. The formats match what the TypeScript Lambdas stored and issued; `tests/unit/test_password.py` and `test_tokens.py` check them against vectors from it.
 - `src/ledger_api/authorizer/`: validates the bearer JWT for every protected route and passes `userId`, `role`, `scope` in the request context. Its cold start is in front of every route's, so it imports only `auth.tokens` and boto3, not pydantic.
 - `src/ledger_api/admin/`: list, enable, disable users.
 - `src/ledger_api/data/`: the Transactions routes, plus the admin's `/admin/...` routes to view, edit and delete any customer's transactions. `ledger.py` holds the rules, `transactions_store.py` the table access, `schemas.py` the pydantic request checks, `cursor.py` the signed list cursors (REST and MCP share them, so cursors work across both).
@@ -40,7 +40,7 @@ CDK stacks (`bin/app.ts`): `LedgerApi` (`lib/ledger-stack.ts`, the app), `Ledger
 - `src/ledger_api/docs/`: serves `/api/openapi.json`, which `openapi.py` builds from the pydantic request schemas the Lambdas validate with (`python -m ledger_api.docs.openapi` prints it).
 - `src/ledger_api/http.py` holds the shared handler plumbing (`with_errors`, `ApiError` → `{ error: { code, message } }`, `parse_body`, `require_admin`); `log.py` writes the redacted JSON log lines; `db.py` makes the DynamoDB resource.
 
-Two tables, both keyed `pk`/`sk`: Users (users, username claims, refresh-token hashes, lockouts) and Data (`USER#<userId>` partition holding `TXN#<date>#<id>` items plus `TXNREF#<id>` pointers; indexes `byCategory` on `gsi2pk`/`gsi2sk` and `allByDate` on `gsi3pk`/`gsi3sk` for the admin's cross-customer list). `src/data/data-table.ts` and `src/auth/users-table.ts` define the keys for the stack; `tests/integration/conftest.py` builds its tables to match.
+Two tables, both keyed `pk`/`sk`: Users (users, username claims, Google account claims, refresh-token hashes, lockouts) and Data (`USER#<userId>` partition holding `TXN#<date>#<id>` items plus `TXNREF#<id>` pointers; indexes `byCategory` on `gsi2pk`/`gsi2sk` and `allByDate` on `gsi3pk`/`gsi3sk` for the admin's cross-customer list). `src/data/data-table.ts` and `src/auth/users-table.ts` define the keys for the stack; `tests/integration/conftest.py` builds its tables to match.
 
 ## Design and working agreement
 
@@ -50,7 +50,7 @@ Two tables, both keyed `pk`/`sk`: Users (users, username claims, refresh-token h
 - Behaviour that touches DynamoDB is tested as integration tests in `tests/integration/` against DynamoDB Local, not with a stubbed client. Pure logic goes in `tests/unit/`.
 - Use `ledger_api.db.dynamodb()` for DynamoDB access; it picks up `DYNAMODB_ENDPOINT` for local runs.
 - The project must stay at $0/month: prefer free AWS features (SSM Parameter Store over Secrets Manager, no WAF/KMS) and call out anything that would cost money.
-- Secrets (JWT signing secret, root admin password) live only in SSM. Never put credentials in source, tests or CDK context.
+- Secrets (JWT signing secret, root admin password, Google client secret) live only in SSM. Never put credentials in source, tests or CDK context.
 - Every API route must also be listed in `src/ledger_api/docs/openapi.py`; `test/unit/openapi.test.ts` fails if the spec and the stack's routes differ. Request schemas live in each area's `schemas.py` (pydantic `TypeAdapter`s) so the spec can import them without pulling in handlers; a check done in code (an `AfterValidator`) also states its format in the schema (`json_schema_extra`), so the spec shows it.
 - Log through `ledger_api.log.log`, which redacts passwords, tokens, cookies and Authorization headers. The failed-login alarm counts `{ "event": "login_failed" }` lines from the auth Lambda.
 

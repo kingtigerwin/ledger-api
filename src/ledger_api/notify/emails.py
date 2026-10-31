@@ -37,6 +37,8 @@ def emails_for(before: Item, after: Item, settings: EmailSettings) -> list[Email
     user_id = str(after["id"])
     username = str(after["username"])
     customer_email = after.get("email") if isinstance(after.get("email"), str) else None
+    # Someone who came through Google has no password to go with their username.
+    sign_in = "sign in with Google" if after.get("authProvider") == "google" else f"sign in as {username}"
     emails: list[Email] = []
 
     if not before and after.get("status") == "pending":
@@ -88,7 +90,7 @@ def emails_for(before: Item, after: Item, settings: EmailSettings) -> list[Email
                 user_id=user_id,
                 to=customer_email,
                 subject="Your Ledger account is approved",
-                text=f"Hi {username},\n\nYour Ledger account has been approved. You can now sign in as {username}.\n",
+                text=f"Hi {username},\n\nYour Ledger account has been approved. You can now {sign_in}.\n",
             )
         )
     return emails

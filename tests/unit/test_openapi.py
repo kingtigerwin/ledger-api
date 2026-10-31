@@ -91,7 +91,7 @@ class TestGivenTheOpenApiSpec:
     def test_every_operation_has_a_unique_id(self) -> None:
         ids = [op["operationId"] for ops in SPEC["paths"].values() for op in ops.values()]
 
-        assert len(ids) == len(set(ids)) == 20
+        assert len(ids) == len(set(ids)) == 22
 
 
 class TestGivenARequestForTheSpec:

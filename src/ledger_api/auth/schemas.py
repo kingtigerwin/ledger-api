@@ -38,6 +38,16 @@ class RefreshTokenBody(TypedDict, total=False):
     refreshToken: StrictStr
 
 
+class GoogleCallbackQuery(TypedDict, total=False):
+    """What Google sends back; the handler checks it against the sign-in attempt rather than validating it here."""
+
+    code: StrictStr
+    state: StrictStr
+    # Instead of a code, when the sign-in didn't complete (such as `access_denied`).
+    error: StrictStr
+
+
 REGISTRATION = TypeAdapter(Registration)
 LOGIN = TypeAdapter(Login)
 REFRESH_TOKEN_BODY = TypeAdapter(RefreshTokenBody)
+GOOGLE_CALLBACK_QUERY = TypeAdapter(GoogleCallbackQuery)
