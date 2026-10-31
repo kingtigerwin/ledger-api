@@ -15,8 +15,8 @@ def event_with(authorization: str | None) -> dict[str, Any]:
     return {"headers": {} if authorization is None else {"authorization": authorization}}
 
 
-def authorize(now: datetime, event: dict[str, Any]) -> dict[str, Any]:
-    return create_authorizer(signing_secret=SECRET, now=lambda: now)(event)
+def authorize(now: datetime, event: dict[str, Any], *, active: bool = True) -> dict[str, Any]:
+    return create_authorizer(signing_secret=SECRET, now=lambda: now, is_active=lambda _: active)(event)
 
 
 class TestGivenARequestToAProtectedRoute:
@@ -44,6 +44,38 @@ class TestGivenARequestToAProtectedRoute:
 
     def test_it_refuses_a_request_without_headers(self) -> None:
         assert authorize(ISSUED_AT, {}) == {"isAuthorized": False}
+
+    def test_it_refuses_a_valid_token_whose_user_is_no_longer_active(self) -> None:
+        token = sign_access_token(CLAIMS, SECRET, ISSUED_AT)
+
+        assert authorize(ISSUED_AT, event_with(f"Bearer {token}"), active=False) == {"isAuthorized": False}
+
+    def test_it_only_looks_up_the_user_of_a_token_it_has_verified(self) -> None:
+        asked: list[str] = []
+
+        def is_active(user_id: str) -> bool:
+            asked.append(user_id)
+            return True
+
+        create_authorizer(signing_secret=SECRET, now=lambda: ISSUED_AT, is_active=is_active)(
+            event_with("Bearer not-a-jwt")
+        )
+
+        assert asked == []
+
+    def test_it_asks_about_the_user_the_token_names(self) -> None:
+        asked: list[str] = []
+
+        def is_active(user_id: str) -> bool:
+            asked.append(user_id)
+            return True
+
+        token = sign_access_token(CLAIMS, SECRET, ISSUED_AT)
+        create_authorizer(signing_secret=SECRET, now=lambda: ISSUED_AT, is_active=is_active)(
+            event_with(f"Bearer {token}")
+        )
+
+        assert asked == ["user-1"]
 
     def test_it_refuses_an_expired_token(self) -> None:
         token = sign_access_token(CLAIMS, SECRET, ISSUED_AT)

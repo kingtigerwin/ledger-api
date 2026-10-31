@@ -30,6 +30,10 @@ def profile(**overrides: Any) -> dict[str, Any]:
 
 
 class TestEmailsFor:
+    class TestGivenACustomerBeingDeleted:
+        def test_sends_nothing(self) -> None:
+            assert emails_for(profile(status="active"), None, SETTINGS) == []
+
     class TestGivenACustomerWhoSignedInWithGoogleBeingApproved:
         def test_it_tells_them_to_use_google_since_they_have_no_password(self) -> None:
             before = profile(authProvider="google", passwordHash=None)

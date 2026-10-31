@@ -83,6 +83,12 @@ OPERATIONS = [
         "Admin: block a user and end their refresh tokens",
     ),
     Operation(
+        "delete",
+        "/api/v1/admin/users/{id}",
+        "adminDeleteUser",
+        "Admin: delete a customer and all their transactions, for good",
+    ),
+    Operation(
         "get",
         "/api/v1/admin/users/{id}/transactions",
         "adminListTransactions",

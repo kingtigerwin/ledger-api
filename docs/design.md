@@ -31,7 +31,7 @@ A public API where customers record their spending. It's a learning and portfoli
   - Accounts are never linked by email: registered addresses aren't verified, so a password account with a matching address could belong to someone else. A customer with both gets two accounts. The admin stays password-only.
   - The client ID and redirect URI are in `cdk.json`; the client secret is in SSM (`/ledger-api/google-client-secret`), put there by hand and read on first use, so a problem with it can't stop password logins. Without a client ID, both routes redirect to `/login?error=google_unavailable`. Failures log `google_login_failed`, not `login_failed`, so they don't count towards the failed-login alarm.
 - `GET /api/v1/auth/me` returns the signed-in user: `id`, `username`, `email`, `role`, `status`. The admin's user list includes `email` too. Users from before emails, and the bootstrap admin, have none.
-- A custom Lambda authorizer (simple responses) validates the bearer access token on every other route and passes `userId`, `role` and `scope` to it. Results are cached for 60 seconds, so an expired token works for at most a minute longer.
+- A custom Lambda authorizer (simple responses) validates the bearer access token on every other route and passes `userId`, `role` and `scope` to it. It also reads the user from the Users table, and refuses unless they're still `active`, so disabling or deleting someone ends their access token at once rather than up to 15 minutes later. Results aren't cached, or that check would be up to a cache lifetime late. It costs one read per request, a tiny fraction of a cent a month at this scale, and a few milliseconds. API Gateway answers a refusal with 403 and `{"message":"Forbidden"}` (401 only when there's no `Authorization` header), and that includes an expired token; the UI treats it as its cue to refresh.
 - Abuse protection: API Gateway throttling on the stage, tighter on `/auth/*`; 5 failed logins lock a username for 15 minutes.
 
 ## Roles
@@ -40,6 +40,8 @@ A public API where customers record their spending. It's a learning and portfoli
 - **Admin**: lists users by status, enables and disables users (disabling deletes their refresh tokens), records their own transactions like a customer, and can view, edit and delete every customer's transactions.
   - Admin tokens carry `admin:read admin:write transactions:read transactions:write`; customer tokens carry `transactions:read transactions:write`. The admin's own transactions use the normal `/transactions` routes and live in the admin's own partition. Other customers' transactions are reached only through `/admin/...` routes, which check both role and scope (`admin:read` to view, `admin:write` to edit or delete).
   - Admins can't be disabled (409 `cannot_disable_admin`), so the root admin can't be locked out.
+  - The admin can delete a customer: `DELETE /admin/users/{id}` returns 204. There is one admin, `sisi`, so nobody else can. Admins can't be deleted (409 `cannot_delete_admin`), so `sisi` can't delete themselves. Disabling is the reversible way to block someone; deleting can't be undone, and is logged as `user_deleted` with who did it.
+  - Deleting removes the profile, username claim, Google claim, refresh tokens and every item in the user's Data partition, and sends no email. The username and Google account are free to come back as someone new, who starts as `pending`. The user is disabled first and the profile goes last, so a delete that fails part-way leaves them unable to sign in and can be run again. Being disabled first also stops their access token at the authorizer, so nothing new can arrive while their data is deleted. Signing out doesn't do this: `logout` ends the refresh token, and the UI forgets its access token, but a copy of that token keeps working until it expires, up to 15 minutes.
   - Listing users scans the Users table, which is fine at this scale; a status index is the upgrade path.
 
 ## Data
@@ -87,7 +89,7 @@ All under `/api/v1`.
 |---|---|
 | Auth | `POST /auth/register`, `POST /auth/login`, `GET /auth/google/start`, `GET /auth/google/callback`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` |
 | Transactions | `POST /transactions`, `GET /transactions/{id}`, `GET /transactions` (`cursor`, `limit`, `from`, `to`, `category`), `GET /transactions/summary?month=YYYY-MM`, `PATCH /transactions/{id}`, `DELETE /transactions/{id}` |
-| Admin | `GET /admin/users?status=pending`, `POST /admin/users/{id}/enable`, `POST /admin/users/{id}/disable`, `GET /admin/users/{id}/transactions`, `GET /admin/transactions` (everyone's, each with `userId`; same filters), `PATCH /admin/users/{id}/transactions/{transactionId}`, `DELETE /admin/users/{id}/transactions/{transactionId}` |
+| Admin | `GET /admin/users?status=pending`, `POST /admin/users/{id}/enable`, `POST /admin/users/{id}/disable`, `DELETE /admin/users/{id}`, `GET /admin/users/{id}/transactions`, `GET /admin/transactions` (everyone's, each with `userId`; same filters), `PATCH /admin/users/{id}/transactions/{transactionId}`, `DELETE /admin/users/{id}/transactions/{transactionId}` |
 
 ### MCP, for agents
 

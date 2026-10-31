@@ -123,6 +123,11 @@ class UsersStore:
         item = self._table.get_item(Key=_profile_key(user_id), ConsistentRead=True).get("Item")
         return _user(item) if item else None
 
+    def is_active(self, user_id: str) -> bool:
+        """False for a disabled or deleted user, whose access token may not have expired yet."""
+        user = self.get_by_id(user_id)
+        return user is not None and user.status == "active"
+
     def user_id_for(self, username: str) -> str | None:
         """The ID behind a username, from its claim item; usernames are stored lower-case."""
         item = self._table.get_item(Key=_username_key(username)).get("Item")
@@ -295,8 +300,39 @@ class UsersStore:
     def delete_refresh_token(self, user_id: str, token_hash: str) -> None:
         self._table.delete_item(Key=_refresh_token_key(user_id, token_hash))
 
+    def delete(self, user: User) -> None:
+        """
+        Deletes the user and every item of theirs, which frees their username and Google account. The profile and
+        claims go together, so a Google claim can never outlive its profile: find_by_google_sub would find nobody,
+        and create_google_user would be refused, shutting that person out for good.
+        """
+        self.revoke_refresh_tokens(user.id)
+        name = self._table.name
+        keys = [_profile_key(user.id), _username_key(user.username), *self._google_keys(user.id)]
+        self._table.meta.client.transact_write_items(
+            TransactItems=[{"Delete": {"TableName": name, "Key": key}} for key in keys]
+        )
+
+    def _google_keys(self, user_id: str) -> list[dict[str, str]]:
+        """
+        The user's Google claims, if any. Only `sub` finds a claim and the profile doesn't hold it, so this scans,
+        as listing users does; deleting a user is rare.
+        """
+        keys: list[dict[str, str]] = []
+        scan: dict[str, Any] = {
+            "FilterExpression": Attr("sk").eq("GOOGLE") & Attr("userId").eq(user_id),
+            "ProjectionExpression": "pk, sk",
+            "ConsistentRead": True,
+        }
+        while True:
+            page = self._table.scan(**scan)
+            keys.extend({"pk": str(item["pk"]), "sk": str(item["sk"])} for item in page.get("Items", []))
+            if "LastEvaluatedKey" not in page:
+                return keys
+            scan["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
     def revoke_refresh_tokens(self, user_id: str) -> None:
-        """Deletes every refresh token the user has, logging them out everywhere within one access-token lifetime."""
+        """Deletes every refresh token the user has, logging them out everywhere."""
         query: dict[str, Any] = {
             "KeyConditionExpression": Key("pk").eq(f"USER#{user_id}") & Key("sk").begins_with("REFRESH#"),
             "ProjectionExpression": "pk, sk",

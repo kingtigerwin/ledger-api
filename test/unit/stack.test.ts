@@ -82,18 +82,36 @@ describe("LedgerStack", () => {
     });
   });
 
-  it("has a Lambda authorizer that reads the bearer token and caches for 60 seconds", () => {
+  it("has a Lambda authorizer that reads the bearer token and caches nothing, so a deleted user is refused at once", () => {
     template.hasResourceProperties("AWS::ApiGatewayV2::Authorizer", {
       AuthorizerType: "REQUEST",
       AuthorizerPayloadFormatVersion: "2.0",
       EnableSimpleResponses: true,
       IdentitySource: ["$request.header.Authorization"],
-      AuthorizerResultTtlInSeconds: 60,
+      AuthorizerResultTtlInSeconds: 0,
     });
+  });
+
+  it("lets the authorizer read the Users table, but not write to it", () => {
+    const [, authorizer] = Object.entries(template.findResources("AWS::Lambda::Function")).find(([id]) =>
+      id.startsWith("AuthorizerFunction"),
+    )!;
+    expect(authorizer.Properties.Environment.Variables).toMatchObject({
+      USERS_TABLE: { Ref: expect.stringMatching(/^UsersTable/) },
+    });
+    const role = authorizer.Properties.Role["Fn::GetAtt"][0];
+    const [, policy] = Object.entries(template.findResources("AWS::IAM::Policy")).find(([, p]) =>
+      p.Properties.Roles.some((r: { Ref: string }) => r.Ref === role),
+    )!;
+    const document = JSON.stringify(policy.Properties.PolicyDocument);
+    expect(document).toContain("dynamodb:GetItem");
+    expect(document).not.toContain("dynamodb:PutItem");
+    expect(document).not.toContain("dynamodb:DeleteItem");
   });
 
   it("puts the admin routes behind the authorizer", () => {
     for (const routeKey of [
+      "DELETE /api/v1/admin/users/{id}",
       "GET /api/v1/admin/users",
       "POST /api/v1/admin/users/{id}/enable",
       "POST /api/v1/admin/users/{id}/disable",
@@ -159,7 +177,7 @@ describe("LedgerStack", () => {
     expect(JSON.stringify(policy.Properties.PolicyDocument)).toContain("ssm:GetParameter");
   });
 
-  it("serves the admin routes from Python, with the Users table's name", () => {
+  it("serves the admin routes from Python, with both tables' names, since deleting a user takes their data too", () => {
     const [, admin] = Object.entries(template.findResources("AWS::Lambda::Function")).find(([id]) =>
       id.startsWith("AdminFunction"),
     )!;
@@ -169,7 +187,12 @@ describe("LedgerStack", () => {
       Architectures: ["arm64"],
       LoggingConfig: { LogFormat: "JSON" },
       MemorySize: 256,
-      Environment: { Variables: { USERS_TABLE: { Ref: expect.stringMatching(/^UsersTable/) } } },
+      Environment: {
+        Variables: {
+          USERS_TABLE: { Ref: expect.stringMatching(/^UsersTable/) },
+          DATA_TABLE: { Ref: expect.stringMatching(/^DataTable/) },
+        },
+      },
     });
   });
 
