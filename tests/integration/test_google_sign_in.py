@@ -86,7 +86,7 @@ def item(table: "Table", pk: str, sk: str) -> dict[str, Any]:
 
 
 def seed_google_user(table: "Table", status: UserStatus) -> None:
-    """Signs the user in once, which leaves them pending, then gives them `status`."""
+    """Signs the user in once, then gives them `status`."""
     store = UsersStore(table)
     user = store.create_google_user(sub="1234567890", username="alice-g1", email="alice@example.com", now=NOW)
     store.set_status(user.id, status)
@@ -114,16 +114,16 @@ class TestStart:
 
 class TestCallback:
     class TestGivenSomeoneNewToLedger:
-        def test_it_creates_a_pending_customer_and_sends_them_to_wait_for_approval(
+        def test_it_creates_an_active_customer_and_signs_them_straight_in(
             self, handler: Handler, google: FakeGoogle, table: "Table"
         ) -> None:
             res = sign_in(handler, google)
 
-            assert (res.status, res.location) == (302, "/pending?via=google")
-            assert not any(cookie.startswith("refreshToken=") for cookie in res.cookies)
+            assert (res.status, res.location) == (302, "/chat")
+            assert any(cookie.startswith("refreshToken=") for cookie in res.cookies)
             claim = item(table, "GOOGLE#1234567890", "GOOGLE")
             profile = item(table, f"USER#{claim['userId']}", "PROFILE")
-            assert profile["status"] == "pending"
+            assert profile["status"] == "active"
             assert profile["role"] == "customer"
             assert profile["email"] == "Alice.B@example.com"
             assert profile["authProvider"] == "google"
@@ -166,15 +166,18 @@ class TestCallback:
             assert refreshed.body["accessToken"]
 
     class TestGivenAPendingGoogleUser:
-        def test_it_says_so_without_creating_a_second_account(
+        def test_it_activates_them_and_signs_them_in_without_creating_a_second_account(
             self, handler: Handler, google: FakeGoogle, table: "Table"
         ) -> None:
             seed_google_user(table, "pending")
 
             res = sign_in(handler, google)
 
-            assert res.location == "/pending?via=google"
-            assert table.scan(Select="COUNT")["Count"] == 3
+            assert res.location == "/chat"
+            claim = item(table, "GOOGLE#1234567890", "GOOGLE")
+            assert item(table, f"USER#{claim['userId']}", "PROFILE")["status"] == "active"
+            # The profile and its two claims, plus the session this sign-in started.
+            assert table.scan(Select="COUNT")["Count"] == 4
 
     class TestGivenADisabledGoogleUser:
         def test_it_refuses_them_the_same_way_as_any_failure(
@@ -195,7 +198,7 @@ class TestCallback:
 
             res = sign_in(handler, google)
 
-            assert res.location == "/pending?via=google"
+            assert res.location == "/chat"
             assert item(table, "GOOGLE#1234567890", "GOOGLE")["userId"] != existing["id"]
 
     class TestGivenTwoFirstSignInsAtOnce:

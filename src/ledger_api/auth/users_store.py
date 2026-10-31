@@ -173,7 +173,8 @@ class UsersStore:
 
     def create_google_user(self, *, sub: str, username: str, email: str, now: datetime) -> User:
         """
-        A pending customer with no password, who claims the Google account as well as the username, so one Google
+        An active customer with no password: Google has verified their address, and the agent's daily limits bound
+        what they can cost. They claim the Google account as well as the username, so one Google
         account can never have two users. If a second sign-in got there first, returns that user. Raises
         UsernameTakenError if the username belongs to someone else.
         """
@@ -181,7 +182,7 @@ class UsersStore:
             id=str(uuid.uuid4()),
             username=username,
             role="customer",
-            status="pending",
+            status="active",
             created_at=iso_timestamp(now),
             email=email,
         )
