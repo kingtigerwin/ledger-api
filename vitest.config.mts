@@ -12,19 +12,6 @@ export default defineConfig({
           env: { CDK_CONTEXT_JSON: JSON.stringify({ "aws:cdk:bundling-stacks": [] }) },
         },
       },
-      {
-        test: {
-          name: "integration",
-          include: ["test/integration/**/*.test.ts"],
-          // Runs against DynamoDB Local (`npm run db:up`).
-          env: {
-            DYNAMODB_ENDPOINT: process.env.DYNAMODB_ENDPOINT ?? "http://localhost:8000",
-            AWS_REGION: "ap-southeast-2",
-            AWS_ACCESS_KEY_ID: "local",
-            AWS_SECRET_ACCESS_KEY: "local",
-          },
-        },
-      },
     ],
   },
 });

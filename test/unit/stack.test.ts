@@ -35,6 +35,31 @@ describe("LedgerStack", () => {
     expect(auth?.Properties.Architectures).toEqual(["arm64"]);
   });
 
+  it.each([
+    ["Auth", "auth", 512],
+    ["Authorizer", "authorizer", 256],
+    // Hashes the admin's password with scrypt.
+    ["Bootstrap", "bootstrap", 512],
+  ])("runs the %s function from Python", (name, module, memory) => {
+    const [fn] = Object.entries(template.findResources("AWS::Lambda::Function")).filter(([id]) =>
+      id.startsWith(`${name}Function`),
+    );
+    expect(fn?.[1].Properties).toMatchObject({
+      Runtime: "python3.13",
+      Handler: `ledger_api.${module}.lambda_function.handler`,
+      Architectures: ["arm64"],
+      LoggingConfig: { LogFormat: "JSON" },
+      MemorySize: memory,
+    });
+  });
+
+  it("has no Node.js functions but the docs and CDK's own", () => {
+    const node = Object.entries(template.findResources("AWS::Lambda::Function"))
+      .filter(([, fn]) => String(fn.Properties.Runtime).startsWith("nodejs"))
+      .map(([id]) => id.replace(/[0-9A-F]{8}$/, ""));
+    expect(node.filter((id) => !id.startsWith("BootstrapProviderframework")).sort()).toEqual(["DocsFunction"]);
+  });
+
   it("throttles the API, and the auth routes more tightly", () => {
     const tight = { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 };
     template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
@@ -171,7 +196,7 @@ describe("LedgerStack", () => {
       Handler: "ledger_api.mcp.lambda_function.handler",
       Architectures: ["arm64"],
       LoggingConfig: { LogFormat: "JSON" },
-      MemorySize: 512,
+      MemorySize: 256,
     });
     expect(mcpFunction?.[1].Properties.Environment.Variables).toHaveProperty("DATA_TABLE");
     // It signs list cursors with a key derived from the signing secret, like the Data function.

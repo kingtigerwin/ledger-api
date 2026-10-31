@@ -27,6 +27,6 @@ def redact(value: Any) -> Any:
 
 
 def log(entry: LogEntry, level: Level = "info") -> None:
-    """Writes one JSON line, the same shape as the TypeScript Lambdas', so Logs Insights finds the same fields."""
+    """Writes one JSON line, which Lambda passes through as is, so filters read fields like `$.event`."""
     line: str = json.dumps(redact(entry), default=str)
     print(line, file=sys.stderr if level == "error" else sys.stdout, flush=True)

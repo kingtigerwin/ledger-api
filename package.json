@@ -7,7 +7,6 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration",
     "db:up": "docker compose up -d dynamodb-local",
     "db:down": "docker compose down",
     "synth": "cdk synth",
@@ -16,17 +15,13 @@
     "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1156.0",
     "@aws-sdk/client-ssm": "^3.1156.0",
-    "@aws-sdk/lib-dynamodb": "^3.1156.0",
     "aws-cdk-lib": "^2.274.0",
     "constructs": "^10.8.1",
-    "jose": "^6.2.13",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/aws-lambda": "^8.10.164",
     "@types/node": "^26.6.5",
     "aws-cdk": "^2.1146.1",
     "esbuild": "^0.28.2",
