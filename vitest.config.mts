@@ -7,8 +7,8 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["test/unit/**/*.test.ts"],
-          // Synthesizing a stack would otherwise bundle every Lambda with esbuild, which takes seconds
-          // per stack (enough to time out on CI) and no unit test looks at the bundled code.
+          // Synthesizing a stack would otherwise build the Python bundles with uv, which takes seconds per
+          // stack; only test/unit/python-code.test.ts looks at them, and it turns bundling back on.
           env: { CDK_CONTEXT_JSON: JSON.stringify({ "aws:cdk:bundling-stacks": [] }) },
         },
       },

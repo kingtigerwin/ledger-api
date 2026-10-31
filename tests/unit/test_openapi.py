@@ -18,14 +18,6 @@ def params(method: str, path: str) -> dict[str, dict[str, Any]]:
     return {p["name"]: p for p in operation(method, path)["parameters"]}
 
 
-def refs(node: Any) -> list[str]:
-    if isinstance(node, dict):
-        return [v for k, v in node.items() if k == "$ref"] + [r for v in node.values() for r in refs(v)]
-    if isinstance(node, list):
-        return [r for v in node for r in refs(v)]
-    return []
-
-
 class TestGivenTheOpenApiSpec:
     def test_it_is_openapi_3_1_with_bearer_auth(self) -> None:
         assert SPEC["openapi"] == "3.1.0"
@@ -42,8 +34,10 @@ class TestGivenTheOpenApiSpec:
         assert {"id", "amountCents", "currency"} <= set(body["required"])
 
     def test_its_schemas_are_self_contained(self) -> None:
-        assert refs(SPEC) == []
-        assert "$defs" not in json.dumps(SPEC)
+        printed = json.dumps(SPEC)
+
+        assert '"$ref"' not in printed
+        assert '"$defs"' not in printed
 
     def test_its_schemas_leave_out_pydantics_generated_titles(self) -> None:
         body = operation("post", "/api/v1/auth/register")["requestBody"]["content"]["application/json"]["schema"]
@@ -71,6 +65,12 @@ class TestGivenTheOpenApiSpec:
             "id": {"name": "id", "in": "path", "required": True, "schema": {"type": "string"}},
             "transactionId": {"name": "transactionId", "in": "path", "required": True, "schema": {"type": "string"}},
         }
+
+    def test_it_documents_formats_that_are_checked_in_code(self) -> None:
+        register = operation("post", "/api/v1/auth/register")["requestBody"]["content"]["application/json"]["schema"]
+
+        assert register["properties"]["email"]["format"] == "email"
+        assert params("get", "/api/v1/transactions/summary")["month"]["schema"]["pattern"] == r"^\d{4}-(0[1-9]|1[0-2])$"
 
     def test_it_documents_the_logins_refresh_token_default(self) -> None:
         body = operation("post", "/api/v1/auth/login")["requestBody"]["content"]["application/json"]["schema"]

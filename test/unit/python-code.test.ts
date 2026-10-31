@@ -46,13 +46,13 @@ describe("given the Python functions' code", () => {
 
   it("is built for every Python function", () => {
     expect([...files.keys()].map((id) => id.replace(/Function.*/, "")).sort()).toEqual([
-      "Admin", "Auth", "Authorizer", "Bootstrap", "Data", "Mcp", "Notify",
+      "Admin", "Auth", "Authorizer", "Bootstrap", "Data", "Docs", "Mcp", "Notify",
     ]);
   });
 
   it("uploads one bundle for all but Mcp, and another for Mcp", () => {
     const key = (name: string) => keys.get([...keys.keys()].find((id) => id.startsWith(`${name}Function`))!);
-    const lean = ["Notify", "Admin", "Data", "Auth", "Authorizer", "Bootstrap"].map(key);
+    const lean = ["Notify", "Admin", "Data", "Auth", "Authorizer", "Bootstrap", "Docs"].map(key);
     expect(new Set(lean).size).toBe(1);
     expect(key("Mcp")).not.toEqual(key("Data"));
   });
