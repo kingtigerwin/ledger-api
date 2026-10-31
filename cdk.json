@@ -7,6 +7,8 @@
     "alarmEmail": "",
     "emailFrom": "noreply@haoran.cloud",
     "adminPageUrl": "https://ledger.haoran.cloud/admin",
+    "googleClientId": "765927006459-64e2nf56v7g0lfvnhkhrf1vecod4eku3.apps.googleusercontent.com",
+    "googleRedirectUri": "https://ledger.haoran.cloud/api/v1/auth/google/callback",
     "customDomain": { "domainName": "api.haoran.cloud", "zoneName": "haoran.cloud", "hostedZoneId": "Z5UXKBB5IU578" }
   }
 }

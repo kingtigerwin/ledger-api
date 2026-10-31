@@ -57,6 +57,21 @@ GitHub Actions deploys `main` using GitHub's OIDC login, so no AWS keys are stor
     --query Parameter.Value --output text --region ap-southeast-2
   ```
 
+- To turn on sign-in with Google:
+
+  1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials), set up the consent screen with the scopes `openid` and `email`, and publish it, or only listed test users can sign in.
+  2. Create an OAuth client ID of type *Web application*, with the authorized redirect URI `https://ledger.haoran.cloud/api/v1/auth/google/callback`.
+  3. Put its secret in SSM. `read -s` keeps it out of your shell history:
+
+     ```sh
+     read -rs GOOGLE_CLIENT_SECRET
+     aws ssm put-parameter --name /ledger-api/google-client-secret --type SecureString \
+       --value "$GOOGLE_CLIENT_SECRET" --region ap-southeast-2
+     unset GOOGLE_CLIENT_SECRET
+     ```
+
+  4. Set `googleClientId` in `cdk.json` (it's public) and deploy. Do this before deploying the Google button in ledger-ui.
+
 - Run the smoke test yourself:
 
   ```sh

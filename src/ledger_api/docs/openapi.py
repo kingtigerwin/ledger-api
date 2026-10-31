@@ -12,7 +12,7 @@ from typing import Any, Literal
 from pydantic import TypeAdapter
 
 from ledger_api.admin.schemas import STATUS_QUERY
-from ledger_api.auth.schemas import LOGIN, REFRESH_TOKEN_BODY, REGISTRATION
+from ledger_api.auth.schemas import GOOGLE_CALLBACK_QUERY, LOGIN, REFRESH_TOKEN_BODY, REGISTRATION
 from ledger_api.data.schemas import LIST_QUERY, NEW_TRANSACTION, SUMMARY_QUERY, TRANSACTION_EDIT
 from ledger_api.json_schema import inline_defs, without_titles
 
@@ -57,6 +57,21 @@ OPERATIONS = [
     ),
     Operation(
         "post", "/api/v1/auth/logout", "logout", "End the session's refresh token", body=REFRESH_TOKEN_BODY, public=True
+    ),
+    Operation(
+        "get",
+        "/api/v1/auth/google/start",
+        "startGoogleSignIn",
+        "Redirect to Google to sign in; browsers navigate here",
+        public=True,
+    ),
+    Operation(
+        "get",
+        "/api/v1/auth/google/callback",
+        "finishGoogleSignIn",
+        "Google's redirect back: sets the refresh cookie and redirects to the app, or to /login?error=...",
+        query=GOOGLE_CALLBACK_QUERY,
+        public=True,
     ),
     Operation("get", "/api/v1/auth/me", "getCurrentUser", "The signed-in user"),
     Operation("get", "/api/v1/admin/users", "adminListUsers", "Admin: list users by status", query=STATUS_QUERY),

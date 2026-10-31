@@ -42,7 +42,8 @@ class StoredCredentials:
     """What a login checks: the user, their password hash and their lockout state."""
 
     user: User
-    password_hash: str
+    # None for someone who signs in with Google, and so has no password.
+    password_hash: str | None
     failed_logins: int
     locked_until: datetime | None
 
@@ -68,6 +69,10 @@ def _profile_key(user_id: str) -> dict[str, str]:
 
 def _username_key(username: str) -> dict[str, str]:
     return {"pk": f"USERNAME#{username}", "sk": "USERNAME"}
+
+
+def _google_key(sub: str) -> dict[str, str]:
+    return {"pk": f"GOOGLE#{sub}", "sk": "GOOGLE"}
 
 
 def _refresh_token_key(user_id: str, token_hash: str) -> dict[str, str]:
@@ -123,6 +128,20 @@ class UsersStore:
         item = self._table.get_item(Key=_username_key(username)).get("Item")
         return str(item["userId"]) if item else None
 
+    def _put_with_claims(self, user: User, claims: list[dict[str, Any]], attributes: dict[str, Any]) -> None:
+        """Writes the profile only if every claim is free; TransactionCanceledException means one wasn't."""
+        name = self._table.name
+        # The resource's own client: it takes plain values, as the Table does, not DynamoDB's typed ones.
+        self._table.meta.client.transact_write_items(
+            TransactItems=[
+                *[
+                    {"Put": {"TableName": name, "Item": claim, "ConditionExpression": "attribute_not_exists(pk)"}}
+                    for claim in claims
+                ],
+                {"Put": {"TableName": name, "Item": {**_profile_key(user.id), **user.as_json(), **attributes}}},
+            ]
+        )
+
     def create(
         self, *, username: str, password_hash: str, role: Role, status: UserStatus, now: datetime, email: str | None
     ) -> User:
@@ -135,29 +154,40 @@ class UsersStore:
             created_at=iso_timestamp(now),
             email=email,
         )
-        name = self._table.name
-        # The resource's own client: it takes plain values, as the Table does, not DynamoDB's typed ones.
-        client = self._table.meta.client
         try:
-            client.transact_write_items(
-                TransactItems=[
-                    {
-                        "Put": {
-                            "TableName": name,
-                            "Item": {**_username_key(username), "userId": user.id},
-                            "ConditionExpression": "attribute_not_exists(pk)",
-                        }
-                    },
-                    {
-                        "Put": {
-                            "TableName": name,
-                            "Item": {**_profile_key(user.id), **user.as_json(), "passwordHash": password_hash},
-                        }
-                    },
-                ]
+            self._put_with_claims(
+                user, [{**_username_key(username), "userId": user.id}], {"passwordHash": password_hash}
             )
-        except client.exceptions.TransactionCanceledException:
+        except self._table.meta.client.exceptions.TransactionCanceledException:
             raise UsernameTakenError(username) from None
+        return user
+
+    def find_by_google_sub(self, sub: str) -> User | None:
+        claim = self._table.get_item(Key=_google_key(sub), ConsistentRead=True).get("Item")
+        return self.get_by_id(str(claim["userId"])) if claim else None
+
+    def create_google_user(self, *, sub: str, username: str, email: str, now: datetime) -> User:
+        """
+        A pending customer with no password, who claims the Google account as well as the username, so one Google
+        account can never have two users. If a second sign-in got there first, returns that user. Raises
+        UsernameTakenError if the username belongs to someone else.
+        """
+        user = User(
+            id=str(uuid.uuid4()),
+            username=username,
+            role="customer",
+            status="pending",
+            created_at=iso_timestamp(now),
+            email=email,
+        )
+        claims = [{**_username_key(username), "userId": user.id}, {**_google_key(sub), "userId": user.id}]
+        try:
+            self._put_with_claims(user, claims, {"authProvider": "google"})
+        except self._table.meta.client.exceptions.TransactionCanceledException:
+            existing = self.find_by_google_sub(sub)
+            if not existing:
+                raise UsernameTakenError(username) from None
+            return existing
         return user
 
     def find_by_username(self, username: str) -> StoredCredentials | None:
@@ -168,9 +198,10 @@ class UsersStore:
         if not item:
             return None
         locked_until = item.get("lockedUntil")
+        password_hash = item.get("passwordHash")
         return StoredCredentials(
             user=_user(item),
-            password_hash=str(item["passwordHash"]),
+            password_hash=str(password_hash) if password_hash else None,
             failed_logins=int(str(item.get("failedLogins", 0))),
             locked_until=datetime.fromisoformat(str(locked_until)) if locked_until else None,
         )

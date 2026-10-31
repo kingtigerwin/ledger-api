@@ -9,6 +9,7 @@ const env = { account: process.env.CDK_DEFAULT_ACCOUNT, region: "ap-southeast-2"
 // Optional: serve the API on a name in an existing Route 53 zone (see cdk.json). The certificate
 // must come from us-east-1 for CloudFront, hence the second stack and cross-region references.
 const customDomain: CustomDomain | undefined = app.node.tryGetContext("customDomain") || undefined;
+const googleClientId: string | undefined = app.node.tryGetContext("googleClientId") || undefined;
 if (customDomain) {
   const { certificate } = new CertificateStack(app, "LedgerApiCertificate", {
     env: { ...env, region: "us-east-1" },
@@ -25,6 +26,10 @@ if (customDomain) {
     adminEmail: app.node.tryGetContext("adminEmail") || undefined,
     // Optional: ledger-ui's admin page, for the admin's approve or reject link (see cdk.json).
     adminPageUrl: app.node.tryGetContext("adminPageUrl") || undefined,
+    // Optional: sign-in with Google (see cdk.json and the README). An empty client ID leaves it off.
+    googleSignIn: googleClientId
+      ? { clientId: googleClientId, redirectUri: app.node.tryGetContext("googleRedirectUri") }
+      : undefined,
   });
 } else {
   new LedgerStack(app, "LedgerApi", { env });

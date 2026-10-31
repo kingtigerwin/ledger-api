@@ -70,6 +70,8 @@ describe("LedgerStack", () => {
         "POST /api/v1/auth/login": tight,
         "POST /api/v1/auth/refresh": tight,
         "POST /api/v1/auth/logout": tight,
+        "GET /api/v1/auth/google/start": tight,
+        "GET /api/v1/auth/google/callback": tight,
       },
     });
   });
@@ -98,6 +100,44 @@ describe("LedgerStack", () => {
     ]) {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: routeKey, AuthorizationType: "CUSTOM" });
     }
+  });
+
+  describe("given Google sign-in", () => {
+    const authResources = (stack: Template) => {
+      const [, auth] = Object.entries(stack.findResources("AWS::Lambda::Function")).find(([id]) =>
+        id.startsWith("AuthFunction"),
+      )!;
+      const role = auth.Properties.Role["Fn::GetAtt"][0];
+      const [, policy] = Object.entries(stack.findResources("AWS::IAM::Policy")).find(([, p]) =>
+        p.Properties.Roles.some((r: { Ref: string }) => r.Ref === role),
+      )!;
+      return { variables: auth.Properties.Environment.Variables, policy: JSON.stringify(policy.Properties.PolicyDocument) };
+    };
+
+    it("gives the auth function the client ID, the redirect URI and only the client secret's parameter", () => {
+      const stack = Template.fromStack(
+        new LedgerStack(new App(), "LedgerApi", {
+          env: { region: "ap-southeast-2" },
+          googleSignIn: { clientId: "client-1", redirectUri: "https://ledger.example.test/callback" },
+        }),
+      );
+
+      const { variables, policy } = authResources(stack);
+
+      expect(variables).toMatchObject({
+        GOOGLE_CLIENT_ID: "client-1",
+        GOOGLE_REDIRECT_URI: "https://ledger.example.test/callback",
+      });
+      expect(policy).toContain("ledger-api/google-client-secret");
+      expect(JSON.stringify(stack.toJSON())).not.toContain("GOOGLE_CLIENT_SECRET");
+    });
+
+    it("leaves all of that out when it isn't configured", () => {
+      const { variables, policy } = authResources(template);
+
+      expect(variables).not.toHaveProperty("GOOGLE_CLIENT_ID");
+      expect(policy).not.toContain("google-client-secret");
+    });
   });
 
   it("serves the transaction routes from Python, with the Data table's name and the signing secret", () => {
@@ -231,6 +271,12 @@ describe("LedgerStack", () => {
     for (const route of ["register", "login", "refresh", "logout"]) {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
         RouteKey: `POST /api/v1/auth/${route}`,
+        AuthorizationType: "NONE",
+      });
+    }
+    for (const route of ["start", "callback"]) {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
+        RouteKey: `GET /api/v1/auth/google/${route}`,
         AuthorizationType: "NONE",
       });
     }

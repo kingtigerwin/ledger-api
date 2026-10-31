@@ -30,6 +30,17 @@ def profile(**overrides: Any) -> dict[str, Any]:
 
 
 class TestEmailsFor:
+    class TestGivenACustomerWhoSignedInWithGoogleBeingApproved:
+        def test_it_tells_them_to_use_google_since_they_have_no_password(self) -> None:
+            before = profile(authProvider="google", passwordHash=None)
+            after = profile(authProvider="google", passwordHash=None, status="active")
+
+            [approved] = emails_for(before, after, SETTINGS)
+
+            assert approved.kind == "approved"
+            assert "sign in with Google" in approved.text
+            assert "sign in as" not in approved.text
+
     class TestGivenACustomerWhoHasJustRegistered:
         def test_asks_the_admin_to_approve_or_reject_it_then_tells_them_the_account_is_waiting(self) -> None:
             # The admin's first, so a customer's address SES won't take can't hold it up.

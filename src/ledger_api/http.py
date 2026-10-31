@@ -92,6 +92,23 @@ def no_content(cookies: list[str] | None = None) -> Response:
     return {"statusCode": 204, "cookies": cookies} if cookies else {"statusCode": 204}
 
 
+def redirect(location: str, cookies: list[str] | None = None) -> Response:
+    """Sends the browser elsewhere; never stored, since each one is the answer to one sign-in."""
+    res: Response = {"statusCode": 302, "headers": {"location": location, "cache-control": "no-store"}}
+    if cookies:
+        res["cookies"] = cookies
+    return res
+
+
+def read_cookie(event: Event, name: str) -> str | None:
+    """A request cookie's value; the HTTP API's payload v2 gives each as `name=value`."""
+    cookies: list[str] = event.get("cookies") or []
+    for cookie in cookies:
+        if cookie.startswith(f"{name}="):
+            return cookie.removeprefix(f"{name}=")
+    return None
+
+
 def with_errors(handler: Handler) -> Handler:
     def wrapped(event: Event) -> Response:
         try:

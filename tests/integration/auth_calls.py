@@ -12,6 +12,8 @@ LOGIN = "POST /api/v1/auth/login"
 REFRESH = "POST /api/v1/auth/refresh"
 LOGOUT = "POST /api/v1/auth/logout"
 ME = "GET /api/v1/auth/me"
+GOOGLE_START = "GET /api/v1/auth/google/start"
+GOOGLE_CALLBACK = "GET /api/v1/auth/google/callback"
 
 SECRET = "test-signing-secret-of-32-bytes!"
 
@@ -32,6 +34,8 @@ class Reply:
     body: Any
     # Set-Cookie values, as the HTTP API's payload v2 returns them.
     cookies: list[str] = field(default_factory=list[str])
+    # Where a redirect goes.
+    location: str | None = None
 
 
 def call(
@@ -41,6 +45,7 @@ def call(
     *,
     cookies: list[str] | None = None,
     auth: dict[str, str] | None = None,
+    query: dict[str, str] | None = None,
 ) -> Reply:
     event: dict[str, Any] = {
         "routeKey": route_key,
@@ -53,8 +58,11 @@ def call(
         event["body"] = json.dumps(body)
     if cookies is not None:
         event["cookies"] = cookies
+    if query is not None:
+        event["queryStringParameters"] = query
     res = handler(event)
-    return Reply(res["statusCode"], json.loads(res["body"]) if res.get("body") else {}, res.get("cookies", []))
+    body = json.loads(res["body"]) if res.get("body") else {}
+    return Reply(res["statusCode"], body, res.get("cookies", []), res.get("headers", {}).get("location"))
 
 
 def cookie_pair(set_cookie: str) -> str:

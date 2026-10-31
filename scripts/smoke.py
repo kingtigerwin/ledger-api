@@ -181,6 +181,7 @@ def run(
 
     logout = api("POST", "/auth/logout", body={"refreshToken": session.body["refreshToken"]})
     expect_status("logout", logout, 204)
+    expect_status("Google sign-in redirects", api("GET", "/auth/google/start"), 302)
     spec_status, _ = send("GET", f"{base}/api/openapi.json", {}, None)
     expect_status("OpenAPI spec", Reply(spec_status, None), 200)
     say("smoke test passed")

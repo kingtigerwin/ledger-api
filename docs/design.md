@@ -8,7 +8,7 @@ A public API where customers record their spending. It's a learning and portfoli
 - CloudFront in front of the API at `/api/*` (no S3 origin in this stack; a UI may be added later as another origin).
 - Region `ap-southeast-2`. The app is one stack, `LedgerApi`; with a custom domain, a small `LedgerApiCertificate` stack in `us-east-1` holds its ACM certificate (CloudFront only accepts certificates from there), passed across with CDK cross-region references.
 - Custom domain: `api.haoran.cloud`, in the existing `haoran.cloud` Route 53 zone (which also serves another site). Configured in `cdk.json` (`customDomain`); the zone is imported by ID, never looked up (a lookup would put the account ID in `cdk.context.json`) and never modified apart from the API's `A`/`AAAA` alias records, ACM's validation record and SES's three DKIM `CNAME` records. The CloudFront domain keeps working.
-- Secrets (JWT signing secret, root admin password) are SSM Parameter Store `SecureString`s, created once by a CDK custom resource and never overwritten. They are never in source.
+- Secrets (JWT signing secret, root admin password) are SSM Parameter Store `SecureString`s, created once by a CDK custom resource and never overwritten. The Google client secret is one too, put there by hand since it comes from Google. They are never in source.
 
 ## Auth
 
@@ -22,6 +22,14 @@ A public API where customers record their spending. It's a learning and portfoli
   - `POST /api/v1/auth/refresh` answers in the same channel the token arrived in.
   - Replaying a refresh token that was already replaced revokes all of that user's refresh tokens, since it was probably copied.
 - `POST /api/v1/auth/logout` deletes the presented refresh token and clears the cookie; it succeeds even without a token.
+- Sign-in with Google is OpenID Connect's authorization code flow with PKCE, run entirely by the auth Lambda, so the UI only links to it.
+  - `GET /api/v1/auth/google/start` sets a 10-minute `__Host-googleSignIn` cookie (`HttpOnly; Secure; SameSite=Lax; Path=/`) holding `state`, `nonce` and the PKCE verifier, and redirects to Google with the scopes `openid email`. `__Host-` stops another site under `haoran.cloud` planting one; it's `Lax` because a `Strict` cookie isn't sent on the navigation back from Google.
+  - `GET /api/v1/auth/google/callback` checks `state` against the cookie, trades the code for an ID token, and redirects: to `/chat` with the ordinary refresh cookie for an active user (the UI's page load trades it for an access token, so no token is ever in a URL), to `/login?error=account_pending` for a pending one, and to `/login?error=google_failed` for a disabled one or any failure. Every outcome is a redirect, since the browser is on that URL.
+  - The redirect URI is on `ledger.haoran.cloud`, whose CloudFront forwards `/api/*` here, so the cookies are first-party to the UI.
+  - The ID token's signature isn't checked: it's RS256, which needs `cryptography`, and that in the shared bundle would load with every `import jwt`, the authorizer's included. OpenID Connect allows this for a token fetched directly from the token endpoint over TLS with the client secret. `iss`, `aud`, `exp`, `nonce` and `email_verified` are checked in code (`src/ledger_api/auth/google.py`).
+  - Someone new becomes a `pending` customer, so a Google account doesn't get round approval, and the sign-up emails go out as usual. They're found again by Google's `sub`, through a `GOOGLE#<sub>` claim item. Their username is the address's local part plus a hash of `sub` (`alice-g1a2b3c4d`), they have no `passwordHash`, and `authProvider` is `google`, so no password logs them in and the approval email says to use Google.
+  - Accounts are never linked by email: registered addresses aren't verified, so a password account with a matching address could belong to someone else. A customer with both gets two accounts. The admin stays password-only.
+  - The client ID and redirect URI are in `cdk.json`; the client secret is in SSM (`/ledger-api/google-client-secret`), put there by hand and read on first use, so a problem with it can't stop password logins. Without a client ID, both routes redirect to `/login?error=google_unavailable`. Failures log `google_login_failed`, not `login_failed`, so they don't count towards the failed-login alarm.
 - `GET /api/v1/auth/me` returns the signed-in user: `id`, `username`, `email`, `role`, `status`. The admin's user list includes `email` too. Users from before emails, and the bootstrap admin, have none.
 - A custom Lambda authorizer (simple responses) validates the bearer access token on every other route and passes `userId`, `role` and `scope` to it. Results are cached for 60 seconds, so an expired token works for at most a minute longer.
 - Abuse protection: API Gateway throttling on the stage, tighter on `/auth/*`; 5 failed logins lock a username for 15 minutes.
@@ -68,7 +76,7 @@ An expense (no income records), owned by the customer who recorded it. There are
 
 ### Tables
 
-- `Users`: users (with their email), username uniqueness items, refresh tokens, lockout counters. With emails on, it streams new and old images to the notify Lambda.
+- `Users`: users (with their email), username uniqueness items, Google account claims, refresh tokens, lockout counters. With emails on, it streams new and old images to the notify Lambda.
 - `Data`: transactions, keyed by customer. Transactions sort by `date#id`. Two secondary indexes: `byCategory` (`gsi2pk`/`gsi2sk`, names kept from when a by-member `gsi1` index existed) filters one customer's transactions by category; `allByDate` (`gsi3pk = TXN`, `gsi3sk = date#id`) lists every customer's transactions for the admin. One partition is fine at household scale.
 
 ## Endpoints
@@ -77,7 +85,7 @@ All under `/api/v1`.
 
 | Area | Endpoints |
 |---|---|
-| Auth | `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` |
+| Auth | `POST /auth/register`, `POST /auth/login`, `GET /auth/google/start`, `GET /auth/google/callback`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` |
 | Transactions | `POST /transactions`, `GET /transactions/{id}`, `GET /transactions` (`cursor`, `limit`, `from`, `to`, `category`), `GET /transactions/summary?month=YYYY-MM`, `PATCH /transactions/{id}`, `DELETE /transactions/{id}` |
 | Admin | `GET /admin/users?status=pending`, `POST /admin/users/{id}/enable`, `POST /admin/users/{id}/disable`, `GET /admin/users/{id}/transactions`, `GET /admin/transactions` (everyone's, each with `userId`; same filters), `PATCH /admin/users/{id}/transactions/{transactionId}`, `DELETE /admin/users/{id}/transactions/{transactionId}` |
 
