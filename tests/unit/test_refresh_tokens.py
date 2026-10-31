@@ -1,6 +1,11 @@
 import re
 
-from ledger_api.auth.refresh_tokens import clear_refresh_cookie, generate_refresh_token, hash_refresh_token, refresh_cookie
+from ledger_api.auth.refresh_tokens import (
+    clear_refresh_cookie,
+    generate_refresh_token,
+    hash_refresh_token,
+    refresh_cookie,
+)
 
 
 class TestGivenARefreshToken:
@@ -22,4 +27,6 @@ class TestGivenTheRefreshCookie:
         )
 
     def test_clearing_it_expires_it_at_once(self) -> None:
-        assert clear_refresh_cookie() == "refreshToken=; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=0"
+        assert (
+            clear_refresh_cookie() == "refreshToken=; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=0"
+        )
