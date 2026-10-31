@@ -1,4 +1,4 @@
-"""Password hashes in the format src/auth/password.ts wrote, so every stored hash still verifies."""
+"""Password hashes in the format the TypeScript auth Lambda wrote, so every stored hash still verifies."""
 
 import base64
 import hashlib

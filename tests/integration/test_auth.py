@@ -43,7 +43,7 @@ class TestRegister:
                 "status": "pending",
                 "createdAt": res.body["createdAt"],
             }
-            # As the TypeScript Lambda wrote it, so the two read each other's users.
+            # As the TypeScript Lambda wrote users, so those and these read the same.
             profile = table.get_item(Key={"pk": f"USER#{res.body['id']}", "sk": "PROFILE"}).get("Item", {})
             assert str(profile["passwordHash"]).startswith("scrypt$131072$8$1$")
             assert str(profile["createdAt"]).endswith("Z")

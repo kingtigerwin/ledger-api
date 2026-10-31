@@ -16,7 +16,7 @@ class TestGivenARefreshToken:
         assert token != generate_refresh_token("user-1")
 
     def test_its_hash_matches_the_typescript_lambdas_so_stored_tokens_still_refresh(self) -> None:
-        # From src/auth/refresh-tokens.ts: base64url without padding.
+        # From the TypeScript auth Lambda: base64url without padding.
         assert hash_refresh_token("user-1.abc") == "0xn37wqrxxFmJhE2mT32o8tAXXW1AEswFYC5ubCW6gA"
 
 

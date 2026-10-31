@@ -1,16 +1,16 @@
 # ledger-api
 
-A serverless API where customers record their spending: TypeScript, AWS CDK, Lambda, API Gateway (HTTP API) behind CloudFront, and DynamoDB. Designed to run at $0/month. The design is in [`docs/design.md`](docs/design.md), and the API is described by the OpenAPI spec served at `/api/openapi.json`.
+A serverless API where customers record their spending: Python Lambdas, AWS CDK in TypeScript, API Gateway (HTTP API) behind CloudFront, and DynamoDB. Designed to run at $0/month. The design is in [`docs/design.md`](docs/design.md), and the API is described by the OpenAPI spec served at `/api/openapi.json`.
 
 ## Develop
 
 ```sh
 npm ci
-npm run db:up             # DynamoDB Local in Docker, for integration tests
 npm run typecheck && npm run lint
-npm test                  # unit + integration
+npm test                  # the CDK stack, the OpenAPI spec and the Python bundles
 
-# The Lambdas moved to Python so far (notify, admin, data, mcp); needs uv, also for cdk synth/deploy
+# Every Lambda but docs is Python; needs uv, also for cdk synth/deploy
+npm run db:up             # DynamoDB Local in Docker, for the integration tests
 uv sync
 uv run ruff check && uv run ruff format --check && uv run pyright
 uv run pytest             # unit + integration

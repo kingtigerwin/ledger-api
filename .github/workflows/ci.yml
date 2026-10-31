@@ -25,8 +25,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:unit
-      - run: npm run test:integration
-      # The Lambdas moved to Python so far.
+      # Every Lambda but the docs; the integration tests use the DynamoDB Local service above.
       - run: uv sync --locked
       - run: uv run ruff check
       - run: uv run ruff format --check

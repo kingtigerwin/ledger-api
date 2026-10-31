@@ -131,7 +131,7 @@ class TestRefresh:
         def test_it_refreshes_with_it(self, handler: Handler, table: "Table") -> None:
             user = seed_user(table, "rory", "active")
             token = f"{user['id']}.issued-by-typescript"
-            # src/auth/users-store.ts's item: the token's hash (base64url, no padding), expiry and ttl.
+            # The TypeScript store's item: the token's hash (base64url, no padding), expiry and ttl.
             table.put_item(
                 Item={
                     "pk": f"USER#{user['id']}",
@@ -170,5 +170,5 @@ class TestLogout:
 
 
 def _node_hash(token: str) -> str:
-    """As src/auth/refresh-tokens.ts hashed it, worked out here rather than with the code under test."""
+    """As the TypeScript Lambda hashed it, worked out here rather than with the code under test."""
     return base64.urlsafe_b64encode(hashlib.sha256(token.encode()).digest()).decode().rstrip("=")

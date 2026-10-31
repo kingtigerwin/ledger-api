@@ -2,7 +2,7 @@ import re
 
 from ledger_api.auth.password import hash_password, verify_password
 
-# Made by the TypeScript auth Lambda (src/auth/password.ts) from "café": the hashes already in the Users table.
+# Made by the TypeScript auth Lambda from "café": the hashes already in the Users table.
 NODE_HASH = "scrypt$131072$8$1$Vlyvx/AF7riDthYGBqeY6g==$fbRd/JilVkzj9xWMlNrr9r3mdv1rylX3Fksz10pD28c="
 
 

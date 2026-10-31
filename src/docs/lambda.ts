@@ -1,6 +1,5 @@
-import { json } from "../http";
 import { buildOpenApi } from "../openapi";
 
-const spec = buildOpenApi();
+const body = JSON.stringify(buildOpenApi());
 
-export const handler = async () => json(200, spec);
+export const handler = async () => ({ statusCode: 200, headers: { "content-type": "application/json" }, body });

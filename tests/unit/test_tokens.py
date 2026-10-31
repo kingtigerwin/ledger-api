@@ -11,7 +11,7 @@ SECRET = "test-signing-secret-of-32-bytes!"
 ISSUED_AT = datetime(2026, 10, 26, 10, 0, 0, tzinfo=UTC)
 CLAIMS = AccessClaims(sub="user-1", role="customer", scope="transactions:read")
 
-# Signed by the TypeScript auth Lambda (jose, src/auth/tokens.ts) with SECRET at ISSUED_AT: tokens already out there.
+# Signed by the TypeScript auth Lambda (jose) with SECRET at ISSUED_AT: tokens already out there.
 JOSE_TOKEN = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
     "eyJyb2xlIjoiY3VzdG9tZXIiLCJzY29wZSI6InRyYW5zYWN0aW9uczpyZWFkIiwic3ViIjoidXNlci0xIiwiaWF0IjoxNzkzMDA4ODAwLCJleHAiOjE3OTMwMDk3MDB9."

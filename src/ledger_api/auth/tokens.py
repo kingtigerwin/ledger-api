@@ -1,4 +1,4 @@
-"""Access tokens: HS256 JWTs, as src/auth/tokens.ts (jose) signed them, so tokens issued by either verify in both."""
+"""Access tokens: HS256 JWTs, as the TypeScript auth Lambda (jose) signed them, so tokens it issued still verify."""
 
 from dataclasses import dataclass
 from datetime import datetime

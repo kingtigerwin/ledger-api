@@ -1,4 +1,4 @@
-"""Refresh tokens, as src/auth/refresh-tokens.ts made them, so the ones already stored keep refreshing."""
+"""Refresh tokens, as the TypeScript auth Lambda made them, so the ones already stored keep refreshing."""
 
 import base64
 import hashlib

@@ -1,4 +1,4 @@
-"""Shared plumbing for the HTTP API's Lambdas, like src/http.ts."""
+"""Shared plumbing for the HTTP API's Lambdas."""
 
 import base64
 import json
