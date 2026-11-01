@@ -141,6 +141,9 @@ def run(
     expect_status("read transaction", api("GET", f"/transactions/{txn['id']}", token=token), 200)
     expect_status("list transactions", api("GET", "/transactions?category=other", token=token), 200)
     expect_status("monthly summary", api("GET", f"/transactions/summary?month={month}", token=token), 200)
+    expect_status("insights", api("GET", f"/insights?today={today.isoformat()}", token=token), 200)
+    # A malformed ID stops before any write, so this reaches the route and leaves nothing behind.
+    expect_status("dismiss refuses a bad insight ID", api("POST", "/insights/nope/dismiss", token=token), 400)
     expect_status("unauthenticated request is refused", api("GET", "/transactions"), 401)
     expect_status("delete transaction", api("DELETE", f"/transactions/{txn['id']}", token=token), 204)
     expect_status("a customer can't delete a user", api("DELETE", "/admin/users/nobody", token=token), 403)

@@ -119,7 +119,7 @@ class TestCallback:
         ) -> None:
             res = sign_in(handler, google)
 
-            assert (res.status, res.location) == (302, "/chat")
+            assert (res.status, res.location) == (302, "/")
             assert any(cookie.startswith("refreshToken=") for cookie in res.cookies)
             claim = item(table, "GOOGLE#1234567890", "GOOGLE")
             profile = item(table, f"USER#{claim['userId']}", "PROFILE")
@@ -148,7 +148,7 @@ class TestCallback:
 
             res = sign_in(handler, google)
 
-            assert (res.status, res.location) == (302, "/chat")
+            assert (res.status, res.location) == (302, "/")
             names = [cookie.split("=")[0] for cookie in res.cookies]
             assert sorted(names) == ["__Host-googleSignIn", "refreshToken"]
             assert next(c for c in res.cookies if c.startswith("__Host-")).find("Max-Age=0") > 0
@@ -173,7 +173,7 @@ class TestCallback:
 
             res = sign_in(handler, google)
 
-            assert res.location == "/chat"
+            assert res.location == "/"
             claim = item(table, "GOOGLE#1234567890", "GOOGLE")
             assert item(table, f"USER#{claim['userId']}", "PROFILE")["status"] == "active"
             # The profile and its two claims, plus the session this sign-in started.
@@ -198,7 +198,7 @@ class TestCallback:
 
             res = sign_in(handler, google)
 
-            assert res.location == "/chat"
+            assert res.location == "/"
             assert item(table, "GOOGLE#1234567890", "GOOGLE")["userId"] != existing["id"]
 
     class TestGivenTwoFirstSignInsAtOnce:

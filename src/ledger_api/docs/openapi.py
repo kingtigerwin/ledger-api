@@ -13,7 +13,7 @@ from pydantic import TypeAdapter
 
 from ledger_api.admin.schemas import STATUS_QUERY
 from ledger_api.auth.schemas import GOOGLE_CALLBACK_QUERY, LOGIN, REFRESH_TOKEN_BODY, REGISTRATION
-from ledger_api.data.schemas import LIST_QUERY, NEW_TRANSACTION, SUMMARY_QUERY, TRANSACTION_EDIT
+from ledger_api.data.schemas import INSIGHTS_QUERY, LIST_QUERY, NEW_TRANSACTION, SUMMARY_QUERY, TRANSACTION_EDIT
 from ledger_api.json_schema import inline_defs, without_titles
 
 
@@ -141,6 +141,19 @@ OPERATIONS = [
         body=TRANSACTION_EDIT,
     ),
     Operation("delete", "/api/v1/transactions/{id}", "deleteTransaction", "Delete a transaction"),
+    Operation(
+        "get",
+        "/api/v1/insights",
+        "listInsights",
+        "What needs the customer's attention: possible duplicates, price rises and car rego coming due",
+        query=INSIGHTS_QUERY,
+    ),
+    Operation(
+        "post",
+        "/api/v1/insights/{id}/dismiss",
+        "dismissInsight",
+        "Stop showing an insight; it returns only if its facts change. Safe to repeat",
+    ),
     Operation(
         "post",
         "/api/mcp",

@@ -205,6 +205,8 @@ export class LedgerStack extends Stack {
       // A static segment wins over {id}, so /summary never reaches the {id} route.
       ["/api/v1/transactions/summary", [HttpMethod.GET]],
       ["/api/v1/transactions/{id}", [HttpMethod.GET, HttpMethod.PATCH, HttpMethod.DELETE]],
+      ["/api/v1/insights", [HttpMethod.GET]],
+      ["/api/v1/insights/{id}/dismiss", [HttpMethod.POST]],
       ["/api/v1/admin/users/{id}/transactions", [HttpMethod.GET]],
       ["/api/v1/admin/users/{id}/transactions/{transactionId}", [HttpMethod.PATCH, HttpMethod.DELETE]],
       ["/api/v1/admin/transactions", [HttpMethod.GET]],
