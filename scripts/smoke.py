@@ -28,6 +28,7 @@ TRANSACTION_TOOLS = [
     "get_transaction",
     "list_transactions",
     "get_monthly_summary",
+    "search_purchases",
     "update_transaction",
     "delete_transaction",
 ]
@@ -141,6 +142,7 @@ def run(
     expect_status("read transaction", api("GET", f"/transactions/{txn['id']}", token=token), 200)
     expect_status("list transactions", api("GET", "/transactions?category=other", token=token), 200)
     expect_status("monthly summary", api("GET", f"/transactions/summary?month={month}", token=token), 200)
+    expect_status("search purchases", api("GET", "/transactions/purchases?q=smoke", token=token), 200)
     expect_status("insights", api("GET", f"/insights?today={today.isoformat()}", token=token), 200)
     # A malformed ID stops before any write, so this reaches the route and leaves nothing behind.
     expect_status("dismiss refuses a bad insight ID", api("POST", "/insights/nope/dismiss", token=token), 400)
@@ -174,6 +176,7 @@ def run(
         lambda result: worked(result) and any(t["id"] == mcp_id for t in text(result)["items"]),
     )
     expect_mcp("MCP monthly summary", tool("get_monthly_summary", {"month": month}), worked)
+    expect_mcp("MCP searches purchases", tool("search_purchases", {"terms": ["smoke"]}), worked)
     expect_mcp(
         "MCP updates it",
         tool("update_transaction", {"id": mcp_id, "version": 1, "note": "edited"}),

@@ -13,7 +13,14 @@ from pydantic import TypeAdapter
 
 from ledger_api.admin.schemas import STATUS_QUERY
 from ledger_api.auth.schemas import GOOGLE_CALLBACK_QUERY, LOGIN, REFRESH_TOKEN_BODY, REGISTRATION
-from ledger_api.data.schemas import INSIGHTS_QUERY, LIST_QUERY, NEW_TRANSACTION, SUMMARY_QUERY, TRANSACTION_EDIT
+from ledger_api.data.schemas import (
+    INSIGHTS_QUERY,
+    LIST_QUERY,
+    NEW_TRANSACTION,
+    PURCHASE_QUERY,
+    SUMMARY_QUERY,
+    TRANSACTION_EDIT,
+)
 from ledger_api.json_schema import inline_defs, without_titles
 
 
@@ -131,6 +138,13 @@ OPERATIONS = [
     ),
     Operation(
         "get", "/api/v1/transactions/summary", "getMonthlySummary", "A month's totals by category", query=SUMMARY_QUERY
+    ),
+    Operation(
+        "get",
+        "/api/v1/transactions/purchases",
+        "searchPurchases",
+        "Find what was bought: receipt lines and typed expenses matching any term, with their total",
+        query=PURCHASE_QUERY,
     ),
     Operation("get", "/api/v1/transactions/{id}", "getTransaction", "One transaction"),
     Operation(

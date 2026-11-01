@@ -23,7 +23,16 @@ from ledger_api.data.ulid import new_ulid
 from ledger_api.http import ApiError, AuthContext, Event, Handler, Response, auth_context, issues, with_errors
 from ledger_api.json_schema import inline_defs
 from ledger_api.log import log
-from ledger_api.mcp.schemas import BY_ID, LIST_ALL_QUERY, TRANSACTION_CHANGE, ById, ListAllQuery, TransactionChange
+from ledger_api.mcp.schemas import (
+    BY_ID,
+    LIST_ALL_QUERY,
+    PURCHASE_SEARCH,
+    TRANSACTION_CHANGE,
+    ById,
+    ListAllQuery,
+    PurchaseSearch,
+    TransactionChange,
+)
 from ledger_api.mcp.transport import serve
 
 type Scope = Literal["transactions:read", "transactions:write", "admin:read"]
@@ -119,6 +128,9 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
         usernames = users.usernames([t["userId"] for t in page["items"]])
         return page | {"items": [t | {"username": usernames.get(t["userId"])} for t in page["items"]]}
 
+    def search_purchases(caller: AuthContext, query: PurchaseSearch) -> Any:
+        return ledger.search_purchases(caller.user_id, query["terms"], query.get("from"), query.get("to"))
+
     tools: list[_Tool[Any]] = [
         _Tool(
             name="create_transaction",
@@ -156,6 +168,22 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             schema=LIST_QUERY,
             annotations=_READ,
             run=lambda caller, query: _without_lines(ledger.list(caller.user_id, query)),
+        ),
+        _Tool(
+            name="search_purchases",
+            scope="transactions:read",
+            title="Search purchases",
+            description=(
+                "Find what the signed-in customer bought, for questions like how much they spent on bananas. "
+                "Searches receipt lines and expenses typed into the chat, and returns only the matches, as "
+                "{ matches, count, totalCents, currency, includesPoints, from, to }. matches holds at most 100, but "
+                "count and totalCents cover them all. Optional from and to (YYYY-MM-DD, inclusive) span at most "
+                "400 days; with neither, it covers the last 400 days. Receipt lines are shelf prices, so when "
+                "includesPoints is true some of the total was paid with points."
+            ),
+            schema=PURCHASE_SEARCH,
+            annotations=_READ,
+            run=search_purchases,
         ),
         _Tool(
             name="get_monthly_summary",

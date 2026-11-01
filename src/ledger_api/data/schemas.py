@@ -134,6 +134,38 @@ class SummaryQuery(TypedDict):
     month: Annotated[StrictStr, AfterValidator(_month), Field(json_schema_extra={"pattern": MONTH_PATTERN})]
 
 
+MAX_SEARCH_TERMS = 10
+
+type SearchTerm = Annotated[StrictStr, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+
+
+def search_terms(q: str) -> list[str]:
+    """The terms in `q`. HTTP API joins repeated query parameters with commas, so commas separate them either way."""
+    return [term for term in (part.strip() for part in q.split(",")) if term]
+
+
+def _search_query(value: str) -> str:
+    terms = search_terms(value)
+    if not 1 <= len(terms) <= MAX_SEARCH_TERMS or any(len(term) > 50 for term in terms):
+        raise ValueError(f"Must be 1 to {MAX_SEARCH_TERMS} comma-separated terms of at most 50 characters")
+    return value
+
+
+# TypedDict, not a class: "from" is a keyword in Python but a key here.
+PurchaseQuery = TypedDict(
+    "PurchaseQuery",
+    {
+        "q": Annotated[
+            StrictStr,
+            AfterValidator(_search_query),
+            Field(description=f"1 to {MAX_SEARCH_TERMS} comma-separated terms of at most 50 characters"),
+        ],
+        "from": NotRequired[IsoDate],
+        "to": NotRequired[IsoDate],
+    },
+)
+
+
 class InsightsQuery(TypedDict):
     # The customer's own date: "due in 14 days" depends on the day it is where they are.
     today: IsoDate
@@ -151,3 +183,4 @@ TRANSACTION_EDIT = TypeAdapter(TransactionEdit)
 LIST_QUERY = TypeAdapter(ListQuery)
 SUMMARY_QUERY = TypeAdapter(SummaryQuery)
 INSIGHTS_QUERY = TypeAdapter(InsightsQuery)
+PURCHASE_QUERY = TypeAdapter(PurchaseQuery)
