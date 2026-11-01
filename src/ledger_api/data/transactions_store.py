@@ -35,6 +35,10 @@ def _range_end(date: str) -> str:
     return f"{date}#\uffff"
 
 
+# Sorts before `TXN#`, so transaction ranges never read a dismissal. It has no index keys either.
+_INSIGHT_PREFIX = "INSIGHT#"
+
+
 type Page[T] = tuple[list[T], dict[str, Any] | None]
 
 
@@ -69,6 +73,10 @@ def _ref_key(user_id: str, id: str) -> dict[str, str]:
 
 def _main_key(user_id: str, date: str, id: str) -> dict[str, str]:
     return {"pk": _user_pk(user_id), "sk": f"TXN#{_sort_key(date, id)}"}
+
+
+def _insight_key(user_id: str, id: str) -> dict[str, str]:
+    return {"pk": _user_pk(user_id), "sk": f"{_INSIGHT_PREFIX}{id}"}
 
 
 def _to_item(user_id: str, t: Transaction) -> dict[str, Any]:
@@ -232,6 +240,25 @@ class TransactionsStore:
                 {"Delete": {"TableName": name, "Key": _ref_key(user_id, id)}},
             ]
         )
+
+    def dismiss_insight(self, user_id: str, id: str, now: datetime) -> None:
+        """Safe to repeat. `delete_all` removes these with the rest of the customer's partition."""
+        self._table.put_item(Item={**_insight_key(user_id, id), "dismissedAt": iso_timestamp(now)})
+
+    def dismissed_insights(self, user_id: str) -> set[str]:
+        """Consistent, so a card just dismissed can't come back on the page's next load."""
+        query: dict[str, Any] = {
+            "KeyConditionExpression": Key("pk").eq(_user_pk(user_id)) & Key("sk").begins_with(_INSIGHT_PREFIX),
+            "ProjectionExpression": "sk",
+            "ConsistentRead": True,
+        }
+        dismissed: set[str] = set()
+        while True:
+            page = self._table.query(**query)
+            dismissed.update(str(item["sk"]).removeprefix(_INSIGHT_PREFIX) for item in page.get("Items", []))
+            if "LastEvaluatedKey" not in page:
+                return dismissed
+            query["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
     def list(self, user_id: str, span: ListRange, start_key: dict[str, Any] | None) -> Page[Transaction]:
         """Newest first: the by-category index if a category is given, otherwise the main key. Dates are a key range."""

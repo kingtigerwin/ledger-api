@@ -55,7 +55,7 @@ SCOPES: dict[Role, str] = {
 _REFRESH_TTL = timedelta(seconds=REFRESH_TOKEN_TTL_SECONDS)
 
 # ledger-ui's pages; relative, so the browser stays on the host that's showing the app.
-_LANDING_PAGE = "/chat"
+_LANDING_PAGE = "/"
 _LOGIN_PAGE = "/login"
 
 

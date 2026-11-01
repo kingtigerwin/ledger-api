@@ -97,6 +97,11 @@ class SummaryQuery(TypedDict):
     month: Annotated[StrictStr, AfterValidator(_month), Field(json_schema_extra={"pattern": MONTH_PATTERN})]
 
 
+class InsightsQuery(TypedDict):
+    # The customer's own date: "due in 14 days" depends on the day it is where they are.
+    today: IsoDate
+
+
 class Transaction(NewTransaction):
     version: int
     createdAt: str
@@ -108,3 +113,4 @@ NEW_TRANSACTION = TypeAdapter(NewTransaction)
 TRANSACTION_EDIT = TypeAdapter(TransactionEdit)
 LIST_QUERY = TypeAdapter(ListQuery)
 SUMMARY_QUERY = TypeAdapter(SummaryQuery)
+INSIGHTS_QUERY = TypeAdapter(InsightsQuery)

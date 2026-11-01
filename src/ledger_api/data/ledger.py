@@ -1,10 +1,12 @@
-from collections.abc import Callable
-from datetime import datetime, timedelta
+import re
+from collections.abc import Callable, Iterator
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from botocore.exceptions import ClientError
 
 from ledger_api.data.cursor import InvalidCursorError, decode_cursor, encode_cursor
+from ledger_api.data.insights import INSIGHT_ID_PATTERN, LOOKBACK, find_insights
 from ledger_api.data.schemas import DEFAULT_LIMIT, ListQuery, NewTransaction, Transaction, TransactionEdit
 from ledger_api.data.transactions_store import (
     ListRange,
@@ -102,21 +104,25 @@ class Ledger:
         """One page of every customer's transactions, for the admin."""
         return self._page(query, self._transactions.list_all)
 
+    def _all_between(self, user_id: str, date_from: str, date_to: str) -> Iterator[Transaction]:
+        """Every page of a date range, for the totals and rules that need the whole of it."""
+        start_key: dict[str, Any] | None = None
+        while True:
+            span = ListRange(date_from=date_from, date_to=date_to, category=None, limit=100)
+            items, start_key = self._transactions.list(user_id, span, start_key)
+            yield from items
+            if not start_key:
+                return
+
     def summary(self, user_id: str, month: str) -> dict[str, Any]:
         """
         Totals for one month, computed on request. A customer records a few hundred transactions a month,
         so reading them all is cheap; precomputed totals would be the upgrade if that changes.
         """
         by_category: dict[str, int] = {}
-        start_key: dict[str, Any] | None = None
-        while True:
-            # Day 31 is a safe upper bound for every month: sort keys compare as strings.
-            span = ListRange(date_from=f"{month}-01", date_to=f"{month}-31", category=None, limit=100)
-            items, start_key = self._transactions.list(user_id, span, start_key)
-            for t in items:
-                by_category[t["category"]] = by_category.get(t["category"], 0) + t["amountCents"]
-            if not start_key:
-                break
+        # Day 31 is a safe upper bound for every month: sort keys compare as strings.
+        for t in self._all_between(user_id, f"{month}-01", f"{month}-31"):
+            by_category[t["category"]] = by_category.get(t["category"], 0) + t["amountCents"]
         ranked = sorted(by_category.items(), key=lambda entry: (-entry[1], entry[0]))
         return {
             "month": month,
@@ -124,3 +130,21 @@ class Ledger:
             "totalCents": sum(by_category.values()),
             "byCategory": [{"category": category, "totalCents": total} for category, total in ranked],
         }
+
+    def insights(self, user_id: str, today: str) -> dict[str, Any]:
+        """
+        What needs the customer's attention, computed on request as `summary` is: over a year or so of
+        one customer's transactions, the read costs almost nothing.
+        """
+        day = date.fromisoformat(today)
+        transactions = [*self._all_between(user_id, (day - LOOKBACK).isoformat(), today)]
+        return {"items": find_insights(transactions, day, self._transactions.dismissed_insights(user_id))}
+
+    def dismiss_insight(self, user_id: str, id: str) -> None:
+        """
+        Doesn't check the insight still applies, which would mean running every rule: an ID nothing
+        matches is one harmless row. The format check keeps anything else out of the table.
+        """
+        if not re.fullmatch(INSIGHT_ID_PATTERN, id):
+            raise ApiError(400, "invalid_insight_id", "That is not an insight ID")
+        self._transactions.dismiss_insight(user_id, id, self._now())

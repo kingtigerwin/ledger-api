@@ -24,7 +24,7 @@ A public API where customers record their spending. It's a learning and portfoli
 - `POST /api/v1/auth/logout` deletes the presented refresh token and clears the cookie; it succeeds even without a token.
 - Sign-in with Google is OpenID Connect's authorization code flow with PKCE, run entirely by the auth Lambda, so the UI only links to it.
   - `GET /api/v1/auth/google/start` sets a 10-minute `__Host-googleSignIn` cookie (`HttpOnly; Secure; SameSite=Lax; Path=/`) holding `state`, `nonce` and the PKCE verifier, and redirects to Google with the scopes `openid email`. `__Host-` stops another site under `haoran.cloud` planting one; it's `Lax` because a `Strict` cookie isn't sent on the navigation back from Google.
-  - `GET /api/v1/auth/google/callback` checks `state` against the cookie, trades the code for an ID token, and redirects: to `/chat` with the ordinary refresh cookie (the UI's page load trades it for an access token, so no token is ever in a URL), and to `/login?error=google_failed` for a disabled one or any failure. Every outcome is a redirect, since the browser is on that URL.
+  - `GET /api/v1/auth/google/callback` checks `state` against the cookie, trades the code for an ID token, and redirects: to `/`, the app's Home page, with the ordinary refresh cookie (the UI's page load trades it for an access token, so no token is ever in a URL), and to `/login?error=google_failed` for a disabled one or any failure. Every outcome is a redirect, since the browser is on that URL.
   - The redirect URI is on `ledger.haoran.cloud`, whose CloudFront forwards `/api/*` here, so the cookies are first-party to the UI.
   - The ID token's signature isn't checked: it's RS256, which needs `cryptography`, and that in the shared bundle would load with every `import jwt`, the authorizer's included. OpenID Connect allows this for a token fetched directly from the token endpoint over TLS with the client secret. `iss`, `aud`, `exp`, `nonce` and `email_verified` are checked in code (`src/ledger_api/auth/google.py`).
   - Someone new becomes an `active` customer with no approval: Google has verified their address, and ledger-agent's daily limits (5 messages per customer, 300 in total) bound what they can cost. A Google user left `pending` from before this is activated at their next sign-in. Password sign-ups still wait for approval, since their addresses aren't verified and they're easy to script. They're found again by Google's `sub`, through a `GOOGLE#<sub>` claim item. Their username is the address's local part plus a hash of `sub` (`alice-g1a2b3c4d`), they have no `passwordHash`, and `authProvider` is `google`, so no password logs them in and their emails say to use Google.
@@ -76,10 +76,24 @@ An expense (no income records), owned by the customer who recorded it. There are
 - `GET /transactions` uses the by-category index when `category` is given and the main key otherwise; dates are always a sort-key range. `limit` is 1–100 (default 50). Filtered pages can be shorter than `limit`; follow `nextCursor` until it's `null`. A cursor from a different filter is rejected as `invalid_cursor`.
 - `GET /transactions/summary?month=YYYY-MM` returns `{ month, currency, totalCents, byCategory: [{ category, totalCents }] }`, largest first.
 
+### Insights
+
+`GET /insights?today=YYYY-MM-DD` returns what the UI's Home page asks the customer to look at, as `{ items: [...] }`. The rules are plain code in `src/ledger_api/data/insights.py`, not Claude: they compare dates and amounts, which code does exactly, instantly and for nothing, while a Claude call per page load would cost money and give different answers on the same data. They run on request over the customer's last 400 days, as `summary` does. The API returns structured fields and the UI writes the wording, so the only non-English text is what the customer stored. `today` comes from the browser, since "due in 14 days" depends on the day it is where the customer is.
+
+The items are ordered by kind, as below. Each carries a 16-character hex `id`, a `type`, `currency` and the `transactions` behind it, so the UI can show them without another request. Transactions are typed in by hand, not read from a bank, so these only know what was recorded: a duplicate is an expense recorded twice rather than a merchant charging twice, and a subscription is visible only if it's recorded every time. Merchants match on a normalised name (case, punctuation, `Pty Ltd`, `.com`), falling back to `item` when there's no merchant, so `Netflix` and `奈飞` are different merchants.
+
+| `type` | Shows when | Extra fields | Clears when |
+|---|---|---|---|
+| `rego_due` | The latest payment mentions `rego`, `car registration`, `vehicle registration`, `CTP`, `green slip` or `车辆注册` in its item, merchant or note, and the estimated due date is within 30 days either way. The estimate is 12 months after that payment, or 3 or 6 if the last two payments were that far apart. There's no stored due date, so the UI says "around". | `estimatedDueDate`, `lastPaidCents` | A newer payment is recorded |
+| `possible_duplicate` | The same merchant, item and amount, at most a day apart, in the last 30 days. A run over three or more dates is a habit, so only repeats on one date in it count. | `merchant`, `amountCents` | One is deleted |
+| `price_rise` | Charges from one merchant at a monthly (26 to 35 days apart, at least 3, the latest within 45 days) or yearly (350 to 380 days apart, at least 2) rhythm whose amounts never fall and end higher; monthly ones must also repeat an amount, so a bill that varies doesn't count. Not `groceries` or `dining`. It compares the oldest charge in the run with the latest, which becomes a comparison with last year once there's a year of history. | `merchant`, `previousCents`, `currentCents`, `since` (the first charge at the new price), `cadence`, `extraPerYearCents` | The price falls or the charges stop |
+
+`POST /insights/{id}/dismiss` returns 204 and can be repeated. An `id` hashes the facts it's about (the transactions, or the merchant and new amount), so a dismissed insight returns only if those change: a third copy, a further rise, the next year's rego. An `id` that isn't 16 hex characters is refused (400 `invalid_insight_id`), but a well-formed one isn't checked against the rules, which would mean running them all; one that matches nothing is a harmless row.
+
 ### Tables
 
 - `Users`: users (with their email), username uniqueness items, Google account claims, refresh tokens, lockout counters. With emails on, it streams new and old images to the notify Lambda.
-- `Data`: transactions, keyed by customer. Transactions sort by `date#id`. Two secondary indexes: `byCategory` (`gsi2pk`/`gsi2sk`, names kept from when a by-member `gsi1` index existed) filters one customer's transactions by category; `allByDate` (`gsi3pk = TXN`, `gsi3sk = date#id`) lists every customer's transactions for the admin. One partition is fine at household scale.
+- `Data`: transactions and dismissed insights (`INSIGHT#<id>`, which sort outside every transaction range, have no index keys and go with the customer), keyed by customer. Transactions sort by `date#id`. Two secondary indexes: `byCategory` (`gsi2pk`/`gsi2sk`, names kept from when a by-member `gsi1` index existed) filters one customer's transactions by category; `allByDate` (`gsi3pk = TXN`, `gsi3sk = date#id`) lists every customer's transactions for the admin. One partition is fine at household scale.
 
 ## Endpoints
 
@@ -89,6 +103,7 @@ All under `/api/v1`.
 |---|---|
 | Auth | `POST /auth/register`, `POST /auth/login`, `GET /auth/google/start`, `GET /auth/google/callback`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` |
 | Transactions | `POST /transactions`, `GET /transactions/{id}`, `GET /transactions` (`cursor`, `limit`, `from`, `to`, `category`), `GET /transactions/summary?month=YYYY-MM`, `PATCH /transactions/{id}`, `DELETE /transactions/{id}` |
+| Insights | `GET /insights?today=YYYY-MM-DD`, `POST /insights/{id}/dismiss` |
 | Admin | `GET /admin/users?status=pending`, `POST /admin/users/{id}/enable`, `POST /admin/users/{id}/disable`, `DELETE /admin/users/{id}`, `GET /admin/users/{id}/transactions`, `GET /admin/transactions` (everyone's, each with `userId`; same filters), `PATCH /admin/users/{id}/transactions/{transactionId}`, `DELETE /admin/users/{id}/transactions/{transactionId}` |
 
 ### MCP, for agents
