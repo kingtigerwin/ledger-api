@@ -202,8 +202,9 @@ export class LedgerStack extends Stack {
     const data = new HttpLambdaIntegration("DataIntegration", dataFunction);
     const dataRoutes: [string, HttpMethod[]][] = [
       ["/api/v1/transactions", [HttpMethod.POST, HttpMethod.GET]],
-      // A static segment wins over {id}, so /summary never reaches the {id} route.
+      // A static segment wins over {id}, so /summary and /purchases never reach the {id} route.
       ["/api/v1/transactions/summary", [HttpMethod.GET]],
+      ["/api/v1/transactions/purchases", [HttpMethod.GET]],
       ["/api/v1/transactions/{id}", [HttpMethod.GET, HttpMethod.PATCH, HttpMethod.DELETE]],
       ["/api/v1/insights", [HttpMethod.GET]],
       ["/api/v1/insights/{id}/dismiss", [HttpMethod.POST]],

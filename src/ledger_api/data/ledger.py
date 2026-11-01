@@ -1,5 +1,5 @@
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -7,6 +7,7 @@ from botocore.exceptions import ClientError
 
 from ledger_api.data.cursor import InvalidCursorError, decode_cursor, encode_cursor
 from ledger_api.data.insights import INSIGHT_ID_PATTERN, LOOKBACK, find_insights
+from ledger_api.data.purchase_search import find_purchases
 from ledger_api.data.schemas import DEFAULT_LIMIT, ListQuery, NewTransaction, Transaction, TransactionEdit
 from ledger_api.data.transactions_store import (
     ListRange,
@@ -130,6 +131,21 @@ class Ledger:
             "totalCents": sum(by_category.values()),
             "byCategory": [{"category": category, "totalCents": total} for category, total in ranked],
         }
+
+    def search_purchases(
+        self, user_id: str, terms: Sequence[str], date_from: str | None, date_to: str | None
+    ) -> dict[str, Any]:
+        """
+        What the customer bought matching any term, over at most `LOOKBACK`, which bounds what one search reads.
+        With no dates, it's that long up to today. Unlike the summary, this reads receipt lines, whose prices are
+        shelf prices, so a total here can differ from the money paid (`includesPoints` says when).
+        """
+        last = date.fromisoformat(date_to) if date_to else self._now().date()
+        first = date.fromisoformat(date_from) if date_from else last - LOOKBACK
+        if first > last or last - first > LOOKBACK:
+            raise ApiError(400, "invalid_date_range", f"Search at most {LOOKBACK.days} days at a time")
+        found = find_purchases(self._all_between(user_id, first.isoformat(), last.isoformat()), terms)
+        return {**found, "from": first.isoformat(), "to": last.isoformat()}
 
     def insights(self, user_id: str, today: str) -> dict[str, Any]:
         """

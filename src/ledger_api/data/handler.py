@@ -1,5 +1,13 @@
 from ledger_api.data.ledger import Ledger
-from ledger_api.data.schemas import INSIGHTS_QUERY, LIST_QUERY, NEW_TRANSACTION, SUMMARY_QUERY, TRANSACTION_EDIT
+from ledger_api.data.schemas import (
+    INSIGHTS_QUERY,
+    LIST_QUERY,
+    NEW_TRANSACTION,
+    PURCHASE_QUERY,
+    SUMMARY_QUERY,
+    TRANSACTION_EDIT,
+    search_terms,
+)
 from ledger_api.http import (
     ApiError,
     Event,
@@ -56,6 +64,13 @@ def create_data_handler(*, ledger: Ledger) -> Handler:
             case "GET /api/v1/transactions/summary":
                 user_id = _require_scope(event, "transactions:read")
                 return json_response(200, ledger.summary(user_id, parse_query(event, SUMMARY_QUERY)["month"]))
+            case "GET /api/v1/transactions/purchases":
+                user_id = _require_scope(event, "transactions:read")
+                query = parse_query(event, PURCHASE_QUERY)
+                return json_response(
+                    200,
+                    ledger.search_purchases(user_id, search_terms(query["q"]), query.get("from"), query.get("to")),
+                )
             case "GET /api/v1/insights":
                 user_id = _require_scope(event, "transactions:read")
                 return json_response(200, ledger.insights(user_id, parse_query(event, INSIGHTS_QUERY)["today"]))

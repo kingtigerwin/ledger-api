@@ -167,7 +167,7 @@ class TestPostMcp:
             assert len(own(ledger, "mcp-twice")) == 2
 
     class TestGivenACustomersOwnTransactions:
-        READ = ("get_transaction", "list_transactions", "get_monthly_summary")
+        READ = ("get_transaction", "list_transactions", "get_monthly_summary", "search_purchases")
         WRITE = ("create_transaction", "update_transaction", "delete_transaction")
 
         def test_offers_every_transactions_endpoint_marking_reads_read_only_and_delete_destructive(
@@ -231,6 +231,26 @@ class TestPostMcp:
             fetched = payload(call_tool(mcp, customer("mcp-receipt-one"), "get_transaction", {"id": SCANNED["id"]}))
 
             assert fetched["receipt"] == SCANNED["receipt"]
+
+        def test_search_purchases_returns_only_the_lines_that_match(self, mcp: Handler, ledger: Ledger) -> None:
+            ledger.record("mcp-search", NewTransaction(**SCANNED))
+
+            found = payload(
+                call_tool(
+                    mcp,
+                    customer("mcp-search"),
+                    "search_purchases",
+                    {"terms": ["chicken", "鸡肉"], "from": "2026-10-01", "to": "2026-10-31"},
+                )
+            )
+
+            assert (found["count"], found["totalCents"]) == (1, 650)
+            assert found["matches"][0]["name"] == "CLS CHICKEN MINCE"
+
+        def test_search_purchases_needs_a_term(self, mcp: Handler) -> None:
+            message = failure(call_tool(mcp, customer("mcp-search-none"), "search_purchases", {"terms": []}))
+
+            assert "terms" in message
 
         def test_list_transactions_refuses_a_tampered_cursor(self, mcp: Handler) -> None:
             message = failure(call_tool(mcp, customer("mcp-cursor"), "list_transactions", {"cursor": "bad.cursor"}))
@@ -336,6 +356,7 @@ class TestPostMcp:
                 "get_monthly_summary",
                 "get_transaction",
                 "list_transactions",
+                "search_purchases",
             ]
 
         @pytest.mark.parametrize(

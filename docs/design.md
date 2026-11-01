@@ -78,6 +78,15 @@ An expense (no income records), owned by the customer who recorded it. There are
 - `GET /transactions` uses the by-category index when `category` is given and the main key otherwise; dates are always a sort-key range. `limit` is 1–100 (default 50). Filtered pages can be shorter than `limit`; follow `nextCursor` until it's `null`. A cursor from a different filter is rejected as `invalid_cursor`.
 - `GET /transactions/summary?month=YYYY-MM` returns `{ month, currency, totalCents, byCategory: [{ category, totalCents }] }`, largest first.
 
+### Searching purchases
+
+`GET /transactions/purchases?q=banana,香蕉&from=&to=` answers "how much did I spend on bananas?", returning only what matches: `{ matches: [{ transactionId, date, merchant, name, amountCents }], count, totalCents, currency, includesPoints, from, to }`. `matches` holds at most 100; `count` and `totalCents` cover everything found. Terms are comma-separated, since HTTP API joins repeated query parameters with commas anyway.
+
+- It searches a receipt's `lines`, both the printed `name` and the plain `product`, so `chicken` finds `CLS CHKN DRUMSTICKS`, and the `item` of an expense with no lines, so one typed into the chat counts too. A receipt's own `item` isn't searched: it only repeats a line, or says "18 items".
+- Rules are in `src/ledger_api/data/purchase_search.py`. A term matches case-insensitively at the start of a word, so `banana` finds `BANANAS` but not `BANDANA`, and only the singular is needed. A term in Chinese matches anywhere, since Chinese has no spaces. A line matching two terms counts once. It's literal text, with no synonyms: the agent passes those as extra terms.
+- There's no index. DynamoDB can't search inside a list, and one customer's transactions for a date range are few enough to filter in code, the same read as `summary` and `insights`. A range is at most 400 days (400 `invalid_date_range`), which bounds what one search reads; with no dates it's the 400 days up to today in UTC.
+- Line amounts are shelf prices, so this total can differ from the money paid. `includesPoints` is true when a match came from a receipt partly paid with points, and the reply should say so.
+
 ### Insights
 
 `GET /insights?today=YYYY-MM-DD` returns what the UI's Home page asks the customer to look at, as `{ items: [...] }`. The rules are plain code in `src/ledger_api/data/insights.py`, not Claude: they compare dates and amounts, which code does exactly, instantly and for nothing, while a Claude call per page load would cost money and give different answers on the same data. They run on request over the customer's last 400 days, as `summary` does. The API returns structured fields and the UI writes the wording, so the only non-English text is what the customer stored. `today` comes from the browser, since "due in 14 days" depends on the day it is where the customer is.
@@ -104,7 +113,7 @@ All under `/api/v1`.
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /auth/register`, `POST /auth/login`, `GET /auth/google/start`, `GET /auth/google/callback`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` |
-| Transactions | `POST /transactions`, `GET /transactions/{id}`, `GET /transactions` (`cursor`, `limit`, `from`, `to`, `category`), `GET /transactions/summary?month=YYYY-MM`, `PATCH /transactions/{id}`, `DELETE /transactions/{id}` |
+| Transactions | `POST /transactions`, `GET /transactions/{id}`, `GET /transactions` (`cursor`, `limit`, `from`, `to`, `category`), `GET /transactions/summary?month=YYYY-MM`, `GET /transactions/purchases?q=&from=&to=`, `PATCH /transactions/{id}`, `DELETE /transactions/{id}` |
 | Insights | `GET /insights?today=YYYY-MM-DD`, `POST /insights/{id}/dismiss` |
 | Admin | `GET /admin/users?status=pending`, `POST /admin/users/{id}/enable`, `POST /admin/users/{id}/disable`, `DELETE /admin/users/{id}`, `GET /admin/users/{id}/transactions`, `GET /admin/transactions` (everyone's, each with `userId`; same filters), `PATCH /admin/users/{id}/transactions/{transactionId}`, `DELETE /admin/users/{id}/transactions/{transactionId}` |
 
@@ -114,7 +123,7 @@ All under `/api/v1`.
 
 Agents call `/api/mcp` and never the REST routes. The flow it was built for: the UI signs the customer in over REST and sends their free text ("today I went to woolworth and bought 30 dollars for cake") plus their access token to the agent (`ledger-agent`, Python, Claude), which calls `create_transaction` over MCP with that token.
 
-Each customer tool mirrors a Transactions route and acts on the signed-in user's own transactions. Tools whose scope the token lacks are hidden from `tools/list` and refused; admin tools also need the `admin` role, as the REST admin routes do, so a customer token never sees them. Results are JSON text: the same bodies the REST routes return, except that `list_all_transactions` adds `username`, and `list_transactions` and `list_all_transactions` leave `lines` out of each `receipt`: everything a list returns goes to Claude, and a receipt can hold dozens of lines. The other receipt fields stay, so chat can answer questions about savings, GST and stores. A search of the lines, returning only what matches, is the upgrade path for "how much did I spend on bananas?". Failures (not found, stale version, bad cursor) come back as tool errors (`isError: true`) with the REST error's message; bad arguments are rejected against the same pydantic schemas, as a tool error naming each field (`category: Input should be ...`). A tool the caller may not use, or one that doesn't exist, gets the same `No tool named ...` error.
+Each customer tool mirrors a Transactions route and acts on the signed-in user's own transactions. Tools whose scope the token lacks are hidden from `tools/list` and refused; admin tools also need the `admin` role, as the REST admin routes do, so a customer token never sees them. Results are JSON text: the same bodies the REST routes return, except that `list_all_transactions` adds `username`, and `list_transactions` and `list_all_transactions` leave `lines` out of each `receipt`: everything a list returns goes to Claude, and a receipt can hold dozens of lines. The other receipt fields stay, so chat can answer questions about savings, GST and stores. `search_purchases` is how chat reaches them, returning only what matches. Failures (not found, stale version, bad cursor) come back as tool errors (`isError: true`) with the REST error's message; bad arguments are rejected against the same pydantic schemas, as a tool error naming each field (`category: Input should be ...`). A tool the caller may not use, or one that doesn't exist, gets the same `No tool named ...` error.
 
 | Tool | Route it mirrors | Needs | Notes |
 |---|---|---|---|
@@ -122,6 +131,7 @@ Each customer tool mirrors a Transactions route and acts on the signed-in user's
 | `get_transaction` | `GET /transactions/{id}` | `transactions:read` | Read-only. |
 | `list_transactions` | `GET /transactions` | `transactions:read` | Read-only. Same filters and signed `nextCursor`; cursors work across REST and MCP. |
 | `get_monthly_summary` | `GET /transactions/summary` | `transactions:read` | Read-only. |
+| `search_purchases` | `GET /transactions/purchases` | `transactions:read` | Read-only. Takes `terms` as a list, and optional `from` and `to`. Returns only the matching lines, so Claude never reads a whole receipt. |
 | `update_transaction` | `PATCH /transactions/{id}` | `transactions:write` | `id`, `version` from the latest read, and the fields to change. |
 | `delete_transaction` | `DELETE /transactions/{id}` | `transactions:write` | Marked destructive, so clients can ask before calling it. |
 | `list_all_transactions` | `GET /admin/transactions` | `admin:read` (and the `admin` role) | Read-only. Every customer's transactions, newest first, same filters and cursors. Each item has `userId` and `username` (null if the user can't be found). Optional `username` (any case) limits it to one customer, for "show haoran's spending": it is resolved through the username claim and lists that customer's own partition, and an unknown username is a `user_not_found` tool error rather than an empty list. Cursors don't carry over between the filtered and unfiltered lists. Unfiltered pages get their usernames from one `BatchGetItem` per page on the Users table, which the MCP Lambda can read but not write. |
