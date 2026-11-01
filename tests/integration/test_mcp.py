@@ -7,8 +7,9 @@ import pytest
 
 from ledger_api.auth.users_store import UsersStore
 from ledger_api.data.ledger import Ledger
+from ledger_api.data.schemas import NewTransaction
 from ledger_api.data.transactions_store import TransactionsStore
-from ledger_api.data.ulid import is_ulid
+from ledger_api.data.ulid import is_ulid, new_ulid
 from ledger_api.http import Handler
 from ledger_api.mcp.handler import create_mcp_handler
 from tests.integration.users import seed_user
@@ -30,6 +31,23 @@ def admin(user_id: str) -> dict[str, str]:
 
 # "today I went to woolworth and bought 30 dollars for cake", as Claude would fill the tool in.
 CAKE = {"date": "2026-10-27", "merchant": "Woolworths", "category": "groceries", "item": "cake", "amountCents": 3000}
+
+
+# A scanned receipt, as ledger-ui saves one over REST.
+SCANNED: dict[str, Any] = {
+    "id": new_ulid(),
+    "date": "2026-10-27",
+    "merchant": "Coles",
+    "category": "groceries",
+    "item": "3 items",
+    "amountCents": 50,
+    "currency": "AUD",
+    "receipt": {
+        "savingsCents": 3100,
+        "location": "The Glen",
+        "lines": [{"name": "CLS CHICKEN MINCE", "product": "chicken mince", "amountCents": 650}],
+    },
+}
 
 
 @pytest.fixture
@@ -197,6 +215,22 @@ class TestPostMcp:
             assert amounts(second) == [100]
             assert second["nextCursor"] is None
             assert amounts(groceries) == [300, 100]
+
+        def test_list_transactions_leaves_out_receipt_lines_so_claude_reads_only_the_small_fields(
+            self, mcp: Handler, ledger: Ledger
+        ) -> None:
+            ledger.record("mcp-receipt", NewTransaction(**SCANNED))
+
+            [listed] = payload(call_tool(mcp, customer("mcp-receipt"), "list_transactions", {}))["items"]
+
+            assert listed["receipt"] == {"savingsCents": 3100, "location": "The Glen"}
+
+        def test_get_transaction_keeps_receipt_lines(self, mcp: Handler, ledger: Ledger) -> None:
+            ledger.record("mcp-receipt-one", NewTransaction(**SCANNED))
+
+            fetched = payload(call_tool(mcp, customer("mcp-receipt-one"), "get_transaction", {"id": SCANNED["id"]}))
+
+            assert fetched["receipt"] == SCANNED["receipt"]
 
         def test_list_transactions_refuses_a_tampered_cursor(self, mcp: Handler) -> None:
             message = failure(call_tool(mcp, customer("mcp-cursor"), "list_transactions", {"cursor": "bad.cursor"}))

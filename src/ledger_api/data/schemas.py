@@ -57,11 +57,48 @@ class TransactionFields(TypedDict):
     note: NotRequired[Note]
 
 
+type ShortText = Annotated[StrictStr, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+type TaxCents = Annotated[StrictInt, Field(ge=0, le=MAX_SAFE_INTEGER)]
+
+
+class ReceiptLine(TypedDict):
+    # As printed, and `product` in plain words: a search for "chicken" can't find `CLS CHKN DRUMSTICKS` otherwise.
+    name: Annotated[StrictStr, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    product: NotRequired[ShortText]
+    # A discount line is negative.
+    amountCents: Annotated[StrictInt, Field(ge=-MAX_SAFE_INTEGER, le=MAX_SAFE_INTEGER)]
+
+
+class ReceiptPayment(TypedDict):
+    label: ShortText
+    # `amountCents` on the transaction is what was paid in money, so points are told apart here.
+    kind: Literal["money", "points"]
+    amountCents: AmountCents
+
+
+class Receipt(TypedDict, total=False):
+    """
+    What a scanned receipt says beyond the transaction's own fields. Only what was printed is sent. There's
+    no photo, card number, loyalty number or staff name here, on purpose.
+    """
+
+    totalCents: AmountCents
+    gstCents: TaxCents
+    savingsCents: TaxCents
+    time: Annotated[StrictStr, StringConstraints(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+    location: ShortText
+    receiptNumber: ShortText
+    abn: Annotated[StrictStr, StringConstraints(pattern=r"^\d{11}$")]
+    lines: Annotated[list[ReceiptLine], Field(max_length=200)]
+    payments: Annotated[list[ReceiptPayment], Field(max_length=10)]
+
+
 class NewTransaction(TransactionFields):
-    """What a client sends to record one; `id` and `currency` are fixed once created."""
+    """What a client sends to record one; `id`, `currency` and `receipt` are fixed once created."""
 
     id: Annotated[StrictStr, AfterValidator(_ulid)]
     currency: Literal["AUD"]
+    receipt: NotRequired[Receipt]
 
 
 class TransactionEdit(TypedDict, total=False):

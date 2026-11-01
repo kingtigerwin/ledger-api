@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 
 from boto3.dynamodb.conditions import Attr, Key
@@ -91,6 +92,17 @@ def _to_item(user_id: str, t: Transaction) -> dict[str, Any]:
     }
 
 
+def _whole_numbers(value: Any) -> Any:
+    """DynamoDB returns every number as a Decimal, however deep; a stored receipt's are all whole cents."""
+    if isinstance(value, Decimal):
+        return int(value)
+    if isinstance(value, list):
+        return [_whole_numbers(entry) for entry in cast(list[Any], value)]
+    if isinstance(value, dict):
+        return {key: _whole_numbers(entry) for key, entry in cast(dict[str, Any], value).items()}
+    return value
+
+
 def _from_item(item: dict[str, Any]) -> Transaction:
     """Picks known fields only, so attributes from older versions (memberId, gsi1*) never leak out."""
     t: dict[str, Any] = {
@@ -107,6 +119,8 @@ def _from_item(item: dict[str, Any]) -> Transaction:
     for optional in ("merchant", "note"):
         if optional in item:
             t[optional] = item[optional]
+    if "receipt" in item:
+        t["receipt"] = _whole_numbers(item["receipt"])
     return Transaction(**t)
 
 
