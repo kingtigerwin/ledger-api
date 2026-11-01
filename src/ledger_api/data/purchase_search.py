@@ -20,6 +20,8 @@ class PurchaseMatch(TypedDict):
     merchant: str | None
     # As printed on a receipt, or the item of an expense typed into the chat.
     name: str
+    # In plain words, when a receipt line has it: `name` can be `CLS CHKN DRUMSTICKS`.
+    product: str | None
     amountCents: int
 
 
@@ -58,12 +60,21 @@ def _matches_in(t: Transaction, pattern: re.Pattern[str]) -> Iterator[PurchaseMa
     receipt = t.get("receipt", {})
     lines = receipt.get("lines")
     if lines:
-        found = [(line["name"], line["amountCents"]) for line in lines if pattern.search(_line_text(line))]
+        found = [
+            (line["name"], line.get("product"), line["amountCents"])
+            for line in lines
+            if pattern.search(_line_text(line))
+        ]
     else:
-        found = [(t["item"], t["amountCents"])] if pattern.search(_normal(t["item"])) else []
-    for name, cents in found:
+        found = [(t["item"], None, t["amountCents"])] if pattern.search(_normal(t["item"])) else []
+    for name, product, cents in found:
         yield PurchaseMatch(
-            transactionId=t["id"], date=t["date"], merchant=t.get("merchant"), name=name, amountCents=cents
+            transactionId=t["id"],
+            date=t["date"],
+            merchant=t.get("merchant"),
+            name=name,
+            product=product,
+            amountCents=cents,
         )
 
 

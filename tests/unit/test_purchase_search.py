@@ -83,7 +83,14 @@ class TestGivenAnExpenseTypedIntoTheChat:
         found = find_purchases([txn("typed", item="bananas", amount_cents=300)], ["banana"])
 
         assert found["matches"] == [
-            {"transactionId": "typed", "date": "2026-11-01", "merchant": "Coles", "name": "bananas", "amountCents": 300}
+            {
+                "transactionId": "typed",
+                "date": "2026-11-01",
+                "merchant": "Coles",
+                "name": "bananas",
+                "product": None,
+                "amountCents": 300,
+            }
         ]
 
     def test_has_no_merchant_when_none_was_given(self) -> None:
@@ -93,6 +100,16 @@ class TestGivenAnExpenseTypedIntoTheChat:
 
 
 class TestGivenAScannedReceipt:
+    def test_returns_the_plain_product_with_the_printed_name(self) -> None:
+        [match] = find_purchases([COLES], ["chicken"])["matches"]
+
+        assert (match["name"], match["product"]) == ("CLS CHKN DRUMSTICKS 2KG", "chicken drumsticks")
+
+    def test_a_line_with_no_plain_product_returns_none(self) -> None:
+        receipt = scanned("misc", ("MISC ITEM", None, 499))
+
+        assert find_purchases([receipt], ["misc"])["matches"][0]["product"] is None
+
     def test_a_one_line_receipt_counts_once_though_its_item_names_the_line(self) -> None:
         lines = [{"name": "B.BARRAMUNDI", "product": "barramundi", "amountCents": 1774}]
         one_line = txn("one", item="barramundi", receipt={"totalCents": 1774, "lines": lines})

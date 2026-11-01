@@ -80,7 +80,7 @@ An expense (no income records), owned by the customer who recorded it. There are
 
 ### Searching purchases
 
-`GET /transactions/purchases?q=banana,香蕉&from=&to=` answers "how much did I spend on bananas?", returning only what matches: `{ matches: [{ transactionId, date, merchant, name, amountCents }], count, totalCents, currency, includesPoints, from, to }`. `matches` holds at most 100; `count` and `totalCents` cover everything found. Terms are comma-separated, since HTTP API joins repeated query parameters with commas anyway.
+`GET /transactions/purchases?q=banana,香蕉&from=&to=` answers "how much did I spend on bananas?", returning only what matches: `{ matches: [{ transactionId, date, merchant, name, product, amountCents }], count, totalCents, currency, includesPoints, from, to }`. `matches` holds at most 100; `count` and `totalCents` cover everything found. Terms are comma-separated, since HTTP API joins repeated query parameters with commas anyway.
 
 - It searches a receipt's `lines`, both the printed `name` and the plain `product`, so `chicken` finds `CLS CHKN DRUMSTICKS`, and the `item` of an expense with no lines, so one typed into the chat counts too. A receipt's own `item` isn't searched: it only repeats a line, or says "18 items".
 - Rules are in `src/ledger_api/data/purchase_search.py`. A term matches case-insensitively at the start of a word, so `banana` finds `BANANAS` but not `BANDANA`, and only the singular is needed. A term in Chinese matches anywhere, since Chinese has no spaces. A line matching two terms counts once. It's literal text, with no synonyms: the agent passes those as extra terms.
