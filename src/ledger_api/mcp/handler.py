@@ -60,6 +60,22 @@ def _list_query(query: ListAllQuery) -> ListQuery:
     return cast(ListQuery, {key: value for key, value in query.items() if key != "username"})
 
 
+def _without_lines(page: dict[str, Any]) -> dict[str, Any]:
+    """
+    A receipt can hold dozens of lines, and everything a list returns goes to Claude, so lists leave them out
+    and keep the small fields, which answer questions like "how much did I save at Coles?". get_transaction
+    still has them.
+    """
+
+    def slim(transaction: dict[str, Any]) -> dict[str, Any]:
+        if "receipt" not in transaction:
+            return transaction
+        receipt = {key: value for key, value in transaction["receipt"].items() if key != "lines"}
+        return transaction | {"receipt": receipt}
+
+    return page | {"items": [slim(t) for t in page["items"]]}
+
+
 def _describe(err: ValidationError) -> str:
     """Each problem as `field: message`, which an agent can act on."""
     return "; ".join(
@@ -97,9 +113,9 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             customer_id = users.user_id_for(username)
             if customer_id is None:
                 raise ApiError(404, "user_not_found", "No such user")
-            own = ledger.list(customer_id, _list_query(query))
+            own = _without_lines(ledger.list(customer_id, _list_query(query)))
             return own | {"items": [t | {"userId": customer_id, "username": username} for t in own["items"]]}
-        page = ledger.list_all(_list_query(query))
+        page = _without_lines(ledger.list_all(_list_query(query)))
         usernames = users.usernames([t["userId"] for t in page["items"]])
         return page | {"items": [t | {"username": usernames.get(t["userId"])} for t in page["items"]]}
 
@@ -139,7 +155,7 @@ def create_mcp_handler(*, ledger: Ledger, users: UsersStore, now: Callable[[], d
             ),
             schema=LIST_QUERY,
             annotations=_READ,
-            run=lambda caller, query: ledger.list(caller.user_id, query),
+            run=lambda caller, query: _without_lines(ledger.list(caller.user_id, query)),
         ),
         _Tool(
             name="get_monthly_summary",
