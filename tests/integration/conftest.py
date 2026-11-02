@@ -30,7 +30,7 @@ def streams() -> DynamoDBStreamsClient:
 
 @pytest.fixture
 def users_table(dynamodb: DynamoDBClient) -> Iterator[str]:
-    """A fresh Users table keyed and streamed like the stack's (`src/auth/users-table.ts`)."""
+    """A fresh Users table keyed and streamed like the stack's (`infra/table_keys.py`)."""
     name = f"users-{uuid.uuid4()}"
     dynamodb.create_table(
         TableName=name,
@@ -55,7 +55,7 @@ def table(users_table: str) -> Table:
 
 @pytest.fixture
 def data_table(dynamodb: DynamoDBClient) -> Iterator[Table]:
-    """A fresh Data table with the stack's two indexes (`src/data/data-table.ts`), through the resource interface."""
+    """A fresh Data table with the stack's two indexes (`infra/table_keys.py`), through the resource interface."""
     name = f"data-{uuid.uuid4()}"
     keys = ["pk", "sk", "gsi2pk", "gsi2sk", "gsi3pk", "gsi3sk"]
     dynamodb.create_table(

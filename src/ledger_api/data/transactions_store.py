@@ -1,4 +1,4 @@
-"""The Data table's transactions, keyed as src/data/data-table.ts defines (and the stack builds the table)."""
+"""The Data table's transactions, keyed as infra/table_keys.py defines (and the stack builds the table)."""
 
 from dataclasses import dataclass
 from datetime import datetime
