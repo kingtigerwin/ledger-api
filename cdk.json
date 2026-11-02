@@ -1,8 +1,5 @@
 {
-  "app": "npx tsx bin/app.ts",
-  "watch": {
-    "include": ["bin/**", "lib/**", "src/**"]
-  },
+  "app": "uv run python infra/app.py",
   "context": {
     "alarmEmail": "",
     "emailFrom": "noreply@haoran.cloud",
