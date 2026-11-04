@@ -50,6 +50,15 @@ describe("LedgerStack", () => {
     });
   });
 
+  it("protects both tables from being deleted, by a stack change or by hand", () => {
+    const tables = Object.values(template.findResources("AWS::DynamoDB::GlobalTable"));
+
+    expect(tables).toHaveLength(2);
+    for (const table of tables) {
+      expect(table.Properties.Replicas).toEqual([expect.objectContaining({ DeletionProtectionEnabled: true })]);
+    }
+  });
+
   it("lets DynamoDB delete expired refresh tokens", () => {
     template.hasResourceProperties("AWS::DynamoDB::GlobalTable", {
       TimeToLiveSpecification: { AttributeName: "ttl", Enabled: true },

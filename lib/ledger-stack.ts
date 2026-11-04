@@ -75,6 +75,8 @@ export class LedgerStack extends Stack {
       partitionKey: { name: usersTableKeys.partitionKey, type: AttributeType.STRING },
       sortKey: { name: usersTableKeys.sortKey, type: AttributeType.STRING },
       billing: Billing.onDemand(),
+      // Free, and a deletion (by a stack change or by hand) would take every user with it.
+      deletionProtection: true,
       timeToLiveAttribute: "ttl",
       // Feeds the notify Lambda; reading a stream from Lambda is free.
       dynamoStream: emailFrom ? StreamViewType[usersTableKeys.streamViewType] : undefined,
@@ -84,6 +86,7 @@ export class LedgerStack extends Stack {
       partitionKey: { name: dataTableKeys.partitionKey, type: AttributeType.STRING },
       sortKey: { name: dataTableKeys.sortKey, type: AttributeType.STRING },
       billing: Billing.onDemand(),
+      deletionProtection: true,
       globalSecondaryIndexes: dataTableKeys.indexes.map((index) => ({
         indexName: index.name,
         partitionKey: { name: index.partitionKey, type: AttributeType.STRING },
