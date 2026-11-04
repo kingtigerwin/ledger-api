@@ -1,5 +1,17 @@
-import { ApiError, authContext, json, noContent, parseBody, withErrors } from "../http";
+import { ApiError, authContext, json, noContent, parseBody, readCookie, redirect, withErrors } from "../http";
 import { log as defaultLog, type Logger } from "../log";
+import {
+  attemptCookie,
+  authorizationUrl,
+  clearAttemptCookie,
+  type GoogleSignIn,
+  GoogleSignInError,
+  identityFrom,
+  newAttempt,
+  readAttempt,
+  sameSecret,
+  usernameFor,
+} from "./google";
 import { hashPassword, verifyPassword } from "./password";
 import { loginSchema, registerSchema } from "./schemas";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
@@ -18,16 +30,19 @@ export interface AuthDeps {
   signingSecret: string;
   now: () => Date;
   log?: Logger;
+  /** Sign-in with Google, if the stack configured it. */
+  google?: GoogleSignIn;
 }
 
-// Admins manage users and read data; they have no household of their own.
 const SCOPES: Record<Role, string> = {
   customer: "transactions:read transactions:write",
   // The admin also records their own spending, like a customer.
   admin: "admin:read admin:write transactions:read transactions:write",
 };
 
-
+// ledger-ui's pages; relative, so the browser stays on the host that's showing the app.
+const LANDING_PAGE = "/";
+const LOGIN_PAGE = "/login";
 
 type Delivery = "cookie" | "body";
 
@@ -40,8 +55,8 @@ const invalidRefreshToken = () => new ApiError(401, "invalid_refresh_token", "Lo
 
 /** Finds the refresh token in the cookie (browsers) or the JSON body (other clients). */
 function readRefreshToken(event: APIGatewayProxyEventV2): { token: string; deliverIn: Delivery } | undefined {
-  const cookie = event.cookies?.find((c) => c.startsWith("refreshToken="));
-  if (cookie) return { token: cookie.slice("refreshToken=".length), deliverIn: "cookie" };
+  const cookie = readCookie(event, "refreshToken");
+  if (cookie !== undefined) return { token: cookie, deliverIn: "cookie" };
   try {
     const { refreshToken } = JSON.parse(event.body ?? "{}");
     if (typeof refreshToken === "string" && refreshToken) return { token: refreshToken, deliverIn: "body" };
@@ -51,9 +66,11 @@ function readRefreshToken(event: APIGatewayProxyEventV2): { token: string; deliv
   return undefined;
 }
 
+/** Register, log in, sign in with Google, refresh, log out and me: the routes that hand out and take back tokens. */
 export function createAuthHandler(deps: AuthDeps) {
   const users = createUsersStore(deps.tableName);
-  const dummyHash = hashPassword("not-a-real-password");
+  // Checked against when the username doesn't exist; made on first need rather than slowing every cold start.
+  let dummyHash: Promise<string> | undefined;
   const log = deps.log ?? defaultLog;
 
   /** A failed login: logged for the failed-login alarm, then returned to the client. */
@@ -67,6 +84,48 @@ export function createAuthHandler(deps: AuthDeps) {
   const accessTokenFor = (user: User, now: Date) =>
     signAccessToken({ sub: user.id, role: user.role, scope: SCOPES[user.role] }, deps.signingSecret, now);
   const refreshExpiry = (now: Date) => new Date(now.getTime() + REFRESH_TOKEN_TTL_SECONDS * 1000);
+  const newRefreshToken = async (user: User, now: Date) => {
+    const refreshToken = generateRefreshToken(user.id);
+    await users.saveRefreshToken(user.id, hashRefreshToken(refreshToken), refreshExpiry(now));
+    return refreshToken;
+  };
+
+  const finishGoogleSignIn = async (event: APIGatewayProxyEventV2, google: GoogleSignIn) => {
+    const query = event.queryStringParameters ?? {};
+    const attempt = readAttempt(event);
+    if (!attempt || !sameSecret(query.state ?? "", attempt.state)) throw new GoogleSignInError("state_mismatch");
+    if (!query.code) throw new GoogleSignInError("no_code");
+    const now = deps.now();
+    const idToken = await google.exchangeCode(query.code, attempt.codeVerifier);
+    const identity = identityFrom(idToken, { clientId: google.clientId, nonce: attempt.nonce, now });
+    // Never matched by email: registered addresses aren't verified, so one could be someone else's.
+    let user =
+      (await users.findByGoogleSub(identity.sub)) ??
+      // The Users table's stream tells the notify Lambda, as it does for a registration.
+      (await users.createGoogleUser({ sub: identity.sub, username: usernameFor(identity), email: identity.email, now }));
+    if (user.status === "disabled") throw new GoogleSignInError("account_disabled");
+    // From before Google sign-ins started active. Someone the admin rejected is disabled, so stops above.
+    if (user.status === "pending") user = await users.setStatus(user.id, "active");
+    // The UI's page load trades this cookie for an access token, as it does after any reload.
+    return redirect(LANDING_PAGE, [clearAttemptCookie(), refreshCookie(await newRefreshToken(user, now))]);
+  };
+
+  /** Every outcome is a redirect: the browser is on this URL, so withErrors' JSON would be the whole page. */
+  const googleCallback = async (event: APIGatewayProxyEventV2) => {
+    if (!deps.google) return redirect(`${LOGIN_PAGE}?error=google_unavailable`);
+    try {
+      return await finishGoogleSignIn(event, deps.google);
+    } catch (err) {
+      if (err instanceof GoogleSignInError || err instanceof UsernameTakenError) {
+        const reason = err instanceof GoogleSignInError ? err.message : "username_taken";
+        // Not login_failed: that counts towards the password-guessing alarm.
+        log({ event: "google_login_failed", reason });
+      } else {
+        log({ event: "unhandled_error", routeKey: event.routeKey, err }, "error");
+      }
+      return redirect(`${LOGIN_PAGE}?error=google_failed`, [clearAttemptCookie()]);
+    }
+  };
 
   return withErrors(async (event) => {
     switch (event.routeKey) {
@@ -95,8 +154,11 @@ export function createAuthHandler(deps: AuthDeps) {
         if (found?.lockedUntil && new Date(found.lockedUntil) > now) {
           throw loginFailed("account_locked");
         }
-        // Hash even when the user doesn't exist, so response time doesn't reveal which usernames are taken.
-        const passwordOk = await verifyPassword(password, found?.passwordHash ?? (await dummyHash));
+        // Hash even with nothing to check against, so response time doesn't reveal which usernames are taken. The
+        // dummy hash has a password of its own, so a match against it must never count.
+        const storedHash = found?.passwordHash;
+        dummyHash ??= hashPassword("not-a-real-password");
+        const passwordOk = (await verifyPassword(password, storedHash ?? (await dummyHash))) && storedHash !== undefined;
         if (!found) throw loginFailed("invalid_credentials");
         if (!passwordOk) await users.recordFailedLogin(found.user.id, now);
         if (!passwordOk || found.user.status === "disabled") throw loginFailed("invalid_credentials");
@@ -105,10 +167,16 @@ export function createAuthHandler(deps: AuthDeps) {
           throw new ApiError(403, "account_pending", "This account is waiting for admin approval");
         }
         const accessToken = await accessTokenFor(found.user, now);
-        const refreshToken = generateRefreshToken(found.user.id);
-        await users.saveRefreshToken(found.user.id, hashRefreshToken(refreshToken), refreshExpiry(now));
+        const refreshToken = await newRefreshToken(found.user, now);
         return withRefreshToken({ accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS }, refreshToken, refreshTokenIn);
       }
+      case "GET /api/v1/auth/google/start": {
+        if (!deps.google) return redirect(`${LOGIN_PAGE}?error=google_unavailable`);
+        const attempt = newAttempt();
+        return redirect(authorizationUrl(attempt, deps.google), [attemptCookie(attempt)]);
+      }
+      case "GET /api/v1/auth/google/callback":
+        return googleCallback(event);
       case "POST /api/v1/auth/refresh": {
         const now = deps.now();
         const presented = readRefreshToken(event);

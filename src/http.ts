@@ -49,6 +49,17 @@ export function noContent(cookies?: string[]): APIGatewayProxyStructuredResultV2
   return { statusCode: 204, cookies };
 }
 
+/** Sends the browser elsewhere; never stored, since each one is the answer to one sign-in. */
+export function redirect(location: string, cookies?: string[]): APIGatewayProxyStructuredResultV2 {
+  return { statusCode: 302, headers: { location, "cache-control": "no-store" }, cookies };
+}
+
+/** A request cookie's value; the HTTP API's payload v2 gives each as `name=value`. */
+export function readCookie(event: Pick<APIGatewayProxyEventV2, "cookies">, name: string): string | undefined {
+  const cookie = event.cookies?.find((c) => c.startsWith(`${name}=`));
+  return cookie?.slice(name.length + 1);
+}
+
 export function parseBody<T extends z.ZodType>(event: APIGatewayProxyEventV2, schema: T): z.infer<T> {
   let raw: unknown;
   try {

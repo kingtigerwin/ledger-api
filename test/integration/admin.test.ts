@@ -201,6 +201,33 @@ describe("DELETE /admin/users/{id}", () => {
     });
   });
 
+  describe("given a customer who signed in with Google", () => {
+    it("removes the Google claim, so they can come back as someone new", async () => {
+      const sisi = await seedSisi("sisi-g1");
+      const store = createUsersStore(tableName);
+      const gone = await store.createGoogleUser({ sub: "del-42", username: "sam-del-g1", email: "sam@example.com", now: NOW });
+
+      const res = await call(handler, DELETE_USER, undefined, { auth: sisi, params: { id: gone.id } });
+
+      expect(res.status).toBe(204);
+      expect(await store.findByGoogleSub("del-42")).toBeUndefined();
+      const back = await store.createGoogleUser({ sub: "del-42", username: "sam-del-g1", email: "sam@example.com", now: NOW });
+      expect(back.id).not.toBe(gone.id);
+      expect(back.status).toBe("active");
+    });
+
+    it("leaves another Google user's claim alone", async () => {
+      const sisi = await seedSisi("sisi-g2");
+      const store = createUsersStore(tableName);
+      const gone = await store.createGoogleUser({ sub: "del-43", username: "sam-del-g2", email: "sam@example.com", now: NOW });
+      const kept = await store.createGoogleUser({ sub: "del-44", username: "pat-del-g2", email: "pat@example.com", now: NOW });
+
+      await call(handler, DELETE_USER, undefined, { auth: sisi, params: { id: gone.id } });
+
+      expect((await store.findByGoogleSub("del-44"))?.id).toBe(kept.id);
+    });
+  });
+
   describe("given sisi deleting themselves", () => {
     it("refuses with 409 cannot_delete_admin", async () => {
       const sisi = await seedSisi("sisi-4");

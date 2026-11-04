@@ -70,6 +70,47 @@ describe("emailsFor", () => {
     });
   });
 
+  describe("given a customer who signed in with Google being approved", () => {
+    it("tells them to use Google, since they have no password", () => {
+      const before = profile({ authProvider: "google", passwordHash: undefined });
+
+      const [approved, ...rest] = emailsFor(before, { ...before, status: "active" }, SETTINGS);
+
+      expect(approved?.kind).toBe("approved");
+      expect(approved?.text).toContain("sign in with Google");
+      expect(approved?.text).not.toContain("sign in as");
+      expect(rest).toEqual([]);
+    });
+  });
+
+  describe("given someone new who signed in with Google", () => {
+    const after = profile({ authProvider: "google", passwordHash: undefined, status: "active" });
+
+    it("tells the admin they joined, then welcomes them", () => {
+      const [notice, welcome, ...rest] = emailsFor(undefined, after, SETTINGS);
+
+      expect(notice).toMatchObject({ kind: "new_signup", to: "sisi@example.com" });
+      expect(notice?.subject).toContain("haoran");
+      expect(notice?.subject).not.toContain("approval");
+      expect(notice?.text).toContain("haoran@example.com");
+      expect(notice?.text).toContain("POST https://api.haoran.cloud/api/v1/admin/users/u-1/disable");
+      expect(welcome).toMatchObject({ kind: "welcome", to: "haoran@example.com", subject: "Welcome to Ledger" });
+      expect(welcome?.text).toContain("sign in with Google");
+      expect(rest).toEqual([]);
+    });
+
+    it("points the admin at the admin page when there is one", () => {
+      const [notice] = emailsFor(undefined, after, { ...SETTINGS, adminPageUrl: "https://ledger.haoran.cloud/admin" });
+
+      expect(notice?.text).toContain("https://ledger.haoran.cloud/admin");
+      expect(notice?.text).not.toContain("POST");
+    });
+
+    it("only welcomes them when there's no admin address", () => {
+      expect(emailsFor(undefined, after, { apiUrl: SETTINGS.apiUrl }).map((e) => e.kind)).toEqual(["welcome"]);
+    });
+  });
+
   describe("given a change that isn't a sign-up or a first approval", () => {
     it.each([
       ["a disabled customer enabled again", profile({ status: "disabled" }), profile({ status: "active" })],

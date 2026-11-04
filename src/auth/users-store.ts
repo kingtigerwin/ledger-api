@@ -42,6 +42,7 @@ export class InvalidRefreshTokenError extends Error {
 
 const profileKey = (id: string) => ({ pk: `USER#${id}`, sk: "PROFILE" });
 const usernameKey = (username: string) => ({ pk: `USERNAME#${username}`, sk: "USERNAME" });
+const googleKey = (sub: string) => ({ pk: `GOOGLE#${sub}`, sk: "GOOGLE" });
 const refreshTokenKey = (userId: string, tokenHash: string) => ({ pk: `USER#${userId}`, sk: `REFRESH#${tokenHash}` });
 
 // `ttl` (epoch seconds) lets DynamoDB delete expired tokens for free.
@@ -121,8 +122,55 @@ export function createUsersStore(tableName: string) {
       return user;
     },
 
+    async findByGoogleSub(sub: string): Promise<User | undefined> {
+      const { Item: claim } = await ddb.send(
+        new GetCommand({ TableName: tableName, Key: googleKey(sub), ConsistentRead: true }),
+      );
+      return claim ? this.getById(claim.userId as string) : undefined;
+    },
+
+    /**
+     * An active customer with no password: Google has verified their address, and the agent's daily limits bound
+     * what they can cost. They claim the Google account as well as the username, so one Google account can never
+     * have two users. If a second sign-in got there first, returns that user. Throws UsernameTakenError if the
+     * username belongs to someone else.
+     */
+    async createGoogleUser(input: { sub: string; username: string; email: string; now: Date }): Promise<User> {
+      const user: User = {
+        id: randomUUID(),
+        username: input.username,
+        email: input.email,
+        role: "customer",
+        status: "active",
+        createdAt: input.now.toISOString(),
+      };
+      try {
+        await ddb.send(
+          new TransactWriteCommand({
+            TransactItems: [
+              ...[usernameKey(user.username), googleKey(input.sub)].map((key) => ({
+                Put: {
+                  TableName: tableName,
+                  Item: { ...key, userId: user.id },
+                  ConditionExpression: "attribute_not_exists(pk)",
+                },
+              })),
+              { Put: { TableName: tableName, Item: { ...profileKey(user.id), ...user, authProvider: "google" } } },
+            ],
+          }),
+        );
+      } catch (err) {
+        if (!(err instanceof Error && err.name === "TransactionCanceledException")) throw err;
+        const existing = await this.findByGoogleSub(input.sub);
+        if (!existing) throw new UsernameTakenError();
+        return existing;
+      }
+      return user;
+    },
+
+    /** `passwordHash` is missing for someone who signs in with Google, and so has no password. */
     async findByUsername(username: string): Promise<
-      { user: User; passwordHash: string; failedLogins: number; lockedUntil?: string } | undefined
+      { user: User; passwordHash?: string; failedLogins: number; lockedUntil?: string } | undefined
     > {
       const { Item: claim } = await ddb.send(
         new GetCommand({ TableName: tableName, Key: usernameKey(username), ConsistentRead: true }),

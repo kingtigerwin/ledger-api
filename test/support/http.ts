@@ -8,6 +8,8 @@ export interface Response {
   body: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   /** Set-Cookie values, as the HTTP API payload v2 returns them. */
   cookies: string[];
+  /** Where a redirect goes. */
+  location?: string;
 }
 
 export interface CallOptions {
@@ -37,7 +39,12 @@ export async function call(handler: Handler, routeKey: string, body?: unknown, o
     isBase64Encoded: false,
   } as unknown as APIGatewayProxyEventV2;
   const res = (await handler(event)) as APIGatewayProxyStructuredResultV2;
-  return { status: res.statusCode ?? 200, body: res.body ? JSON.parse(res.body) : {}, cookies: res.cookies ?? [] };
+  return {
+    status: res.statusCode ?? 200,
+    body: res.body ? JSON.parse(res.body) : {},
+    cookies: res.cookies ?? [],
+    location: res.headers?.location as string | undefined,
+  };
 }
 
 /** Turns a Set-Cookie value into the `name=value` a browser would send back. */

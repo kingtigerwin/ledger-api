@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { statusQuery } from "./admin/schemas";
-import { loginSchema, registerSchema } from "./auth/schemas";
+import { googleCallbackQuery, loginSchema, registerSchema } from "./auth/schemas";
 import {
   createTransactionSchema,
   listQuerySchema,
@@ -28,6 +28,8 @@ const operations: Operation[] = [
   { method: "post", path: "/api/v1/auth/login", operationId: "login", summary: "Log in; returns an access token and a refresh token (cookie, or body if refreshTokenIn is \"body\")", body: loginSchema, public: true },
   { method: "post", path: "/api/v1/auth/refresh", operationId: "refreshTokens", summary: "Swap a refresh token (cookie or body) for new tokens", body: refreshBody, public: true },
   { method: "post", path: "/api/v1/auth/logout", operationId: "logout", summary: "End the session's refresh token", body: refreshBody, public: true },
+  { method: "get", path: "/api/v1/auth/google/start", operationId: "startGoogleSignIn", summary: "Redirect to Google to sign in; browsers navigate here", public: true },
+  { method: "get", path: "/api/v1/auth/google/callback", operationId: "finishGoogleSignIn", summary: "Google's redirect back: sets the refresh cookie and redirects to the app, or to /login?error=...", query: googleCallbackQuery, public: true },
   { method: "get", path: "/api/v1/auth/me", operationId: "getCurrentUser", summary: "The signed-in user" },
   { method: "get", path: "/api/v1/admin/users", operationId: "adminListUsers", summary: "Admin: list users by status", query: statusQuery },
   { method: "post", path: "/api/v1/admin/users/{id}/enable", operationId: "adminEnableUser", summary: "Admin: activate a user" },
