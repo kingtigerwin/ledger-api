@@ -111,7 +111,7 @@ describe("GET /transactions/purchases", () => {
       }
 
       expect((await search("pur-g", { q: "banana" })).body.count).toBe(103);
-    });
+    }, 30_000); // a hundred writes and more, while other files run
   });
 
   it.each([

@@ -4,6 +4,7 @@ import { ApiError, authContext, json, noContent, parseBody, requireAdmin, withEr
 import { createLedger, type LedgerDeps } from "./ledger";
 import {
   createTransactionSchema,
+  insightsQuerySchema,
   listQuerySchema,
   purchaseQuerySchema,
   searchTerms,
@@ -71,6 +72,15 @@ export function createDataHandler(deps: DataDeps) {
         const userId = requireScope(event, "transactions:read");
         const { q, from, to } = parseQuery(event, purchaseQuerySchema);
         return json(200, await ledger.searchPurchases(userId, searchTerms(q), from, to));
+      }
+      case "GET /api/v1/insights": {
+        const userId = requireScope(event, "transactions:read");
+        return json(200, await ledger.insights(userId, parseQuery(event, insightsQuerySchema).today));
+      }
+      case "POST /api/v1/insights/{id}/dismiss": {
+        const userId = requireScope(event, "transactions:write");
+        await ledger.dismissInsight(userId, event.pathParameters?.id ?? "");
+        return noContent();
       }
       case "GET /api/v1/admin/users/{id}/transactions": {
         requireAdmin(event, "admin:read");

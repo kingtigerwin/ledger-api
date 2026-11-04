@@ -1,6 +1,7 @@
 import { ApiError } from "../http";
 import { decodeCursor, encodeCursor, InvalidCursorError } from "./cursor";
 import { addDays, daysBetween, formatDate, LOOKBACK_DAYS } from "./dates";
+import { findInsights, INSIGHT_ID_PATTERN } from "./insights";
 import { findPurchases } from "./purchase-search";
 import type { CreateTransactionInput, ListQuery, Transaction, TransactionFields } from "./transaction-schema";
 import {
@@ -127,6 +128,25 @@ export function createLedger(deps: LedgerDeps) {
         throw new ApiError(400, "invalid_date_range", `Search at most ${LOOKBACK_DAYS} days at a time`);
       }
       return { ...(await findPurchases(allBetween(userId, first, last), terms)), from: first, to: last };
+    },
+
+    /**
+     * What needs the customer's attention, computed on request as `summary` is: over a year or so of
+     * one customer's transactions, the read costs almost nothing.
+     */
+    async insights(userId: string, today: string) {
+      const recent: Transaction[] = [];
+      for await (const t of allBetween(userId, addDays(today, -LOOKBACK_DAYS), today)) recent.push(t);
+      return { items: findInsights(recent, today, await transactions.dismissedInsights(userId)) };
+    },
+
+    /**
+     * Doesn't check the insight still applies, which would mean running every rule: an ID nothing
+     * matches is one harmless row. The format check keeps anything else out of the table.
+     */
+    async dismissInsight(userId: string, id: string) {
+      if (!INSIGHT_ID_PATTERN.test(id)) throw new ApiError(400, "invalid_insight_id", "That is not an insight ID");
+      await transactions.dismissInsight(userId, id, deps.now());
     },
 
     async update(userId: string, id: string, version: number, changes: Partial<TransactionFields>) {

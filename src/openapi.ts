@@ -3,6 +3,7 @@ import { statusQuery } from "./admin/schemas";
 import { googleCallbackQuery, loginSchema, registerSchema } from "./auth/schemas";
 import {
   createTransactionSchema,
+  insightsQuerySchema,
   listQuerySchema,
   purchaseQuerySchema,
   summaryQuerySchema,
@@ -47,6 +48,8 @@ const operations: Operation[] = [
   { method: "get", path: "/api/v1/transactions/{id}", operationId: "getTransaction", summary: "One transaction" },
   { method: "patch", path: "/api/v1/transactions/{id}", operationId: "updateTransaction", summary: "Edit a transaction; send the version you last read", body: updateTransactionSchema },
   { method: "delete", path: "/api/v1/transactions/{id}", operationId: "deleteTransaction", summary: "Delete a transaction" },
+  { method: "get", path: "/api/v1/insights", operationId: "listInsights", summary: "What needs the customer's attention: possible duplicates, price rises and car rego coming due", query: insightsQuerySchema },
+  { method: "post", path: "/api/v1/insights/{id}/dismiss", operationId: "dismissInsight", summary: "Stop showing an insight; it returns only if its facts change. Safe to repeat" },
   { method: "post", path: "/api/mcp", operationId: "mcp", summary: "Model Context Protocol (Streamable HTTP, JSON-RPC) for agents; tools act as the signed-in customer" },
   { method: "get", path: "/api/openapi.json", operationId: "getOpenApiSpec", summary: "This document", public: true },
 ];

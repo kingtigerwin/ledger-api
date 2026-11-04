@@ -2,6 +2,7 @@ import {
   BatchWriteCommand,
   type BatchWriteCommandOutput,
   GetCommand,
+  PutCommand,
   QueryCommand,
   type QueryCommandOutput,
   TransactWriteCommand,
@@ -53,6 +54,10 @@ const fromItem = (item: Record<string, unknown>): Transaction => {
   };
 };
 
+// Sorts before `TXN#`, so transaction ranges never read a dismissal. It has no index keys either.
+const INSIGHT_PREFIX = "INSIGHT#";
+const insightKey = (userId: string, id: string) => ({ pk: userPk(userId), sk: `${INSIGHT_PREFIX}${id}` });
+
 // Sort keys are `<date>#<id>`, so a date range is a key range: from the start of `from`
 // to the end of `to` (the high character sorts after any ID).
 const EARLIEST = "0000-01-01";
@@ -61,6 +66,32 @@ const rangeEnd = (date: string) => `${date}#\uffff`;
 
 export function createTransactionsStore(tableName: string) {
   return {
+    /** Safe to repeat. `deleteAll` removes these with the rest of the customer's partition. */
+    async dismissInsight(userId: string, id: string, now: Date): Promise<void> {
+      await ddb.send(new PutCommand({ TableName: tableName, Item: { ...insightKey(userId, id), dismissedAt: now.toISOString() } }));
+    },
+
+    /** Consistent, so a card just dismissed can't come back on the page's next load. */
+    async dismissedInsights(userId: string): Promise<Set<string>> {
+      const dismissed = new Set<string>();
+      let startKey: Record<string, unknown> | undefined;
+      do {
+        const page: QueryCommandOutput = await ddb.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+            ExpressionAttributeValues: { ":pk": userPk(userId), ":prefix": INSIGHT_PREFIX },
+            ProjectionExpression: "sk",
+            ConsistentRead: true,
+            ExclusiveStartKey: startKey,
+          }),
+        );
+        for (const item of page.Items ?? []) dismissed.add(String(item.sk).slice(INSIGHT_PREFIX.length));
+        startKey = page.LastEvaluatedKey;
+      } while (startKey);
+      return dismissed;
+    },
+
     /** Deletes everything in the user's partition and returns how many items that was; safe to run again. */
     async deleteAll(userId: string): Promise<number> {
       let deleted = 0;

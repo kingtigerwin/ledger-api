@@ -125,6 +125,11 @@ export const purchaseSearchSchema = z.object({
   to: isoDate.optional(),
 });
 
+export const insightsQuerySchema = z.object({
+  // The customer's own date: "due in 14 days" depends on the day it is where they are.
+  today: isoDate,
+});
+
 export type ListQuery = z.infer<typeof listQuerySchema>;
 export type TransactionFields = z.infer<typeof transactionFieldsSchema>;
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
