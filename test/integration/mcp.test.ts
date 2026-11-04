@@ -305,10 +305,10 @@ describe("POST /api/mcp", () => {
   });
 
   describe("given an expense the API would reject", () => {
-    it("reports a tool error and records nothing", async () => {
+    it("reports a tool error naming the field, and records nothing", async () => {
       const res = await callTool(customer("mcp-invalid"), "create_transaction", { ...cake, category: "cake" });
 
-      expect(res.body.result?.isError ?? Boolean(res.body.error)).toBe(true);
+      expect(failure(res)).toContain("category");
       const own = await listOwn("mcp-invalid");
       expect(own.body.items).toEqual([]);
     });
@@ -332,14 +332,14 @@ describe("POST /api/mcp", () => {
       for (const name of ["update_transaction", "delete_transaction"]) {
         const res = await callTool(readOnly, name, { id: "01J0000000000000000000000A", version: 1 });
 
-        expect(res.body.result?.isError ?? Boolean(res.body.error)).toBe(true);
+        expect(failure(res)).toContain(name);
       }
     });
 
     it("refuses to call it", async () => {
       const res = await callTool(readOnly, "create_transaction", cake);
 
-      expect(res.body.result?.isError ?? Boolean(res.body.error)).toBe(true);
+      expect(failure(res)).toContain("create_transaction");
       const own = await listOwn("mcp-read-only");
       expect(own.body.items).toEqual([]);
     });
@@ -510,7 +510,14 @@ describe("POST /api/mcp", () => {
       for (const list of [tools, pretenderTools]) {
         expect(list.body.result.tools.map((t: { name: string }) => t.name)).not.toContain("list_all_transactions");
       }
-      for (const call of [res, pretenderRes]) expect(call.body.result?.isError ?? Boolean(call.body.error)).toBe(true);
+      for (const call of [res, pretenderRes]) expect(failure(call)).toContain("list_all_transactions");
+    });
+
+    it("answers as it would for a tool that doesn't exist, so the admin tools stay unknown", async () => {
+      const refused = failure(await callTool(customer("mcp-not-admin"), "list_all_transactions", {}));
+      const missing = failure(await callTool(customer("mcp-not-admin"), "no_such_tool", {}));
+
+      expect(refused.replace("list_all_transactions", "no_such_tool")).toBe(missing);
     });
   });
 

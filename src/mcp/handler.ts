@@ -67,6 +67,9 @@ export function createMcpHandler(deps: McpDeps) {
       config: { title: string; description: string; inputSchema: S; annotations: ToolAnnotations },
       run: (input: z.infer<S>) => Promise<unknown>,
     ) => {
+      // A tool the caller may not use isn't registered, so it's missing from tools/list, and calling it gets the
+      // same "not found" as a tool that doesn't exist. Admin tools also need the admin role, as `requireAdmin` does.
+      if (!scopes.includes(scope) || (scope.startsWith("admin:") && role !== "admin")) return;
       // The SDK has already validated `input` against `config.inputSchema`.
       const callback: ToolCallback<z.ZodObject> = async (input) => {
         try {
@@ -77,10 +80,7 @@ export function createMcpHandler(deps: McpDeps) {
           return { isError: true, content: [{ type: "text", text: "Something went wrong; try again" }] };
         }
       };
-      const registered = server.registerTool(name, { ...config, inputSchema: config.inputSchema as z.ZodObject }, callback);
-      // Hidden from tools/list, and calls are refused. Admin tools also need the admin role, as `requireAdmin` does.
-      const allowed = scopes.includes(scope) && (!scope.startsWith("admin:") || role === "admin");
-      if (!allowed) registered.disable();
+      server.registerTool(name, { ...config, inputSchema: config.inputSchema as z.ZodObject }, callback);
     };
 
     tool(
