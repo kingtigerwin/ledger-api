@@ -1,6 +1,8 @@
 import { ApiError } from "../http";
 import { decodeCursor, encodeCursor, InvalidCursorError } from "./cursor";
-import type { CreateTransactionInput, ListQuery, TransactionFields } from "./transaction-schema";
+import { addDays, daysBetween, formatDate, LOOKBACK_DAYS } from "./dates";
+import { findPurchases } from "./purchase-search";
+import type { CreateTransactionInput, ListQuery, Transaction, TransactionFields } from "./transaction-schema";
 import {
   createTransactionsStore,
   TransactionNotFoundError,
@@ -57,6 +59,16 @@ export function createLedger(deps: LedgerDeps) {
     };
   };
 
+  /** Every page of a date range, for the totals and rules that need the whole of it. */
+  async function* allBetween(userId: string, from: string, to: string): AsyncGenerator<Transaction> {
+    let startKey: Record<string, unknown> | undefined;
+    do {
+      const page = await transactions.list(userId, { from, to, limit: 100 }, startKey);
+      yield* page.items;
+      startKey = page.lastKey;
+    } while (startKey);
+  }
+
   return {
     /** Records the transaction; a retry with the same id returns what was stored, with `created` false. */
     async record(userId: string, input: CreateTransactionInput) {
@@ -86,16 +98,11 @@ export function createLedger(deps: LedgerDeps) {
     async summary(userId: string, month: string) {
       const byCategory = new Map<string, number>();
       let totalCents = 0;
-      let startKey: Record<string, unknown> | undefined;
-      do {
-        // Day 31 is a safe upper bound for every month: sort keys compare as strings.
-        const page = await transactions.list(userId, { from: `${month}-01`, to: `${month}-31`, limit: 100 }, startKey);
-        for (const t of page.items) {
-          totalCents += t.amountCents;
-          byCategory.set(t.category, (byCategory.get(t.category) ?? 0) + t.amountCents);
-        }
-        startKey = page.lastKey;
-      } while (startKey);
+      // Day 31 is a safe upper bound for every month: sort keys compare as strings.
+      for await (const t of allBetween(userId, `${month}-01`, `${month}-31`)) {
+        totalCents += t.amountCents;
+        byCategory.set(t.category, (byCategory.get(t.category) ?? 0) + t.amountCents);
+      }
 
       return {
         month,
@@ -105,6 +112,21 @@ export function createLedger(deps: LedgerDeps) {
           .map(([category, total]) => ({ category, totalCents: total }))
           .sort((a, b) => b.totalCents - a.totalCents || a.category.localeCompare(b.category)),
       };
+    },
+
+    /**
+     * What the customer bought matching any term, over at most LOOKBACK_DAYS, which bounds what one search reads.
+     * With no dates, it's that long up to today. Unlike the summary, this reads receipt lines, whose prices are
+     * shelf prices, so a total here can differ from the money paid (`includesPoints` says when).
+     */
+    async searchPurchases(userId: string, terms: string[], from?: string, to?: string) {
+      const last = to ?? formatDate(deps.now());
+      const first = from ?? addDays(last, -LOOKBACK_DAYS);
+      const span = daysBetween(first, last);
+      if (span < 0 || span > LOOKBACK_DAYS) {
+        throw new ApiError(400, "invalid_date_range", `Search at most ${LOOKBACK_DAYS} days at a time`);
+      }
+      return { ...(await findPurchases(allBetween(userId, first, last), terms)), from: first, to: last };
     },
 
     async update(userId: string, id: string, version: number, changes: Partial<TransactionFields>) {

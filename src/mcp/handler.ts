@@ -10,6 +10,7 @@ import { log } from "../log";
 import { createLedger, type LedgerDeps } from "../data/ledger";
 import {
   listQuerySchema,
+  purchaseSearchSchema,
   type Receipt,
   summaryQuerySchema,
   transactionFieldsSchema,
@@ -126,6 +127,24 @@ export function createMcpHandler(deps: McpDeps) {
         annotations: READ,
       },
       async (query) => withoutLines(await ledger.list(userId, query)),
+    );
+
+    tool(
+      "search_purchases",
+      "transactions:read",
+      {
+        title: "Search purchases",
+        description:
+          "Find what the signed-in customer bought, for questions like how much they spent on bananas. " +
+          "Searches receipt lines and expenses typed into the chat, and returns only the matches, as " +
+          "{ matches, count, totalCents, currency, includesPoints, from, to }. matches holds at most 100, but " +
+          "count and totalCents cover them all. Optional from and to (YYYY-MM-DD, inclusive) span at most " +
+          "400 days; with neither, it covers the last 400 days. Receipt lines are shelf prices, so when " +
+          "includesPoints is true some of the total was paid with points.",
+        inputSchema: purchaseSearchSchema,
+        annotations: READ,
+      },
+      ({ terms, from, to }) => ledger.searchPurchases(userId, terms, from, to),
     );
 
     tool(

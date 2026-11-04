@@ -98,6 +98,28 @@ describe("POST /api/mcp", () => {
       expect(listed.receipt).toEqual({ savingsCents: 3100, location: "The Glen" });
     });
 
+    it("finds only the lines that match with search_purchases", async () => {
+      await recordOwn("mcp-search", scanned());
+
+      const found = payload(
+        await callTool(customer("mcp-search"), "search_purchases", {
+          terms: ["chicken", "鸡肉"],
+          from: "2026-10-01",
+          to: "2026-10-31",
+        }),
+      );
+
+      expect([found.count, found.totalCents]).toEqual([1, 650]);
+      expect(found.matches[0].name).toBe("CLS CHICKEN MINCE");
+    });
+
+    it("needs a term to search_purchases", async () => {
+      const res = await callTool(customer("mcp-search-none"), "search_purchases", { terms: [] });
+
+      expect(res.body.result.isError).toBe(true);
+      expect(res.body.result.content[0].text).toContain("terms");
+    });
+
     it("keeps its lines in get_transaction", async () => {
       const body = scanned();
       await recordOwn("mcp-receipt-one", body);
@@ -164,7 +186,7 @@ describe("POST /api/mcp", () => {
   });
 
   describe("given a customer's own transactions", () => {
-    const read = ["get_transaction", "list_transactions", "get_monthly_summary"];
+    const read = ["get_transaction", "list_transactions", "get_monthly_summary", "search_purchases"];
     const write = ["create_transaction", "update_transaction", "delete_transaction"];
 
     it("offers every Transactions endpoint as a tool, marking reads read-only and delete destructive", async () => {
@@ -302,6 +324,7 @@ describe("POST /api/mcp", () => {
         "get_monthly_summary",
         "get_transaction",
         "list_transactions",
+        "search_purchases",
       ]);
     });
 

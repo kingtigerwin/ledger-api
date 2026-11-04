@@ -5,6 +5,8 @@ import { createLedger, type LedgerDeps } from "./ledger";
 import {
   createTransactionSchema,
   listQuerySchema,
+  purchaseQuerySchema,
+  searchTerms,
   summaryQuerySchema,
   updateTransactionSchema,
 } from "./transaction-schema";
@@ -64,6 +66,11 @@ export function createDataHandler(deps: DataDeps) {
       case "GET /api/v1/transactions/summary": {
         const userId = requireScope(event, "transactions:read");
         return json(200, await ledger.summary(userId, parseQuery(event, summaryQuerySchema).month));
+      }
+      case "GET /api/v1/transactions/purchases": {
+        const userId = requireScope(event, "transactions:read");
+        const { q, from, to } = parseQuery(event, purchaseQuerySchema);
+        return json(200, await ledger.searchPurchases(userId, searchTerms(q), from, to));
       }
       case "GET /api/v1/admin/users/{id}/transactions": {
         requireAdmin(event, "admin:read");

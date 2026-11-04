@@ -4,6 +4,7 @@ import { googleCallbackQuery, loginSchema, registerSchema } from "./auth/schemas
 import {
   createTransactionSchema,
   listQuerySchema,
+  purchaseQuerySchema,
   summaryQuerySchema,
   updateTransactionSchema,
 } from "./data/transaction-schema";
@@ -42,6 +43,7 @@ const operations: Operation[] = [
   { method: "post", path: "/api/v1/transactions", operationId: "createTransaction", summary: "Record an expense; repeating the same id returns the stored record", body: createTransactionSchema },
   { method: "get", path: "/api/v1/transactions", operationId: "listTransactions", summary: "Transactions, newest first, with optional filters", query: listQuerySchema },
   { method: "get", path: "/api/v1/transactions/summary", operationId: "getMonthlySummary", summary: "A month's totals by category", query: summaryQuerySchema },
+  { method: "get", path: "/api/v1/transactions/purchases", operationId: "searchPurchases", summary: "Find what was bought: receipt lines and typed expenses matching any term, with their total", query: purchaseQuerySchema },
   { method: "get", path: "/api/v1/transactions/{id}", operationId: "getTransaction", summary: "One transaction" },
   { method: "patch", path: "/api/v1/transactions/{id}", operationId: "updateTransaction", summary: "Edit a transaction; send the version you last read", body: updateTransactionSchema },
   { method: "delete", path: "/api/v1/transactions/{id}", operationId: "deleteTransaction", summary: "Delete a transaction" },

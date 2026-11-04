@@ -91,6 +91,40 @@ export const summaryQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Must be YYYY-MM"),
 });
 
+export const MAX_SEARCH_TERMS = 10;
+
+/** The terms in `q`. HTTP API joins repeated query parameters with commas, so commas separate them either way. */
+export const searchTerms = (q: string) =>
+  q
+    .split(",")
+    .map((term) => term.trim())
+    .filter(Boolean);
+
+const searchTermsMessage = `Must be 1 to ${MAX_SEARCH_TERMS} comma-separated terms of at most 50 characters`;
+
+export const purchaseQuerySchema = z.object({
+  q: z
+    .string()
+    .refine((q) => {
+      const terms = searchTerms(q);
+      return terms.length >= 1 && terms.length <= MAX_SEARCH_TERMS && terms.every((term) => term.length <= 50);
+    }, searchTermsMessage)
+    .describe(searchTermsMessage),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
+/** The same search as a tool takes it: a list of terms rather than a comma-separated string. */
+export const purchaseSearchSchema = z.object({
+  terms: z
+    .array(z.string().trim().min(1).max(50))
+    .min(1)
+    .max(MAX_SEARCH_TERMS)
+    .describe("What to look for. A line matches any term. Each matches the start of a word."),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
 export type ListQuery = z.infer<typeof listQuerySchema>;
 export type TransactionFields = z.infer<typeof transactionFieldsSchema>;
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
