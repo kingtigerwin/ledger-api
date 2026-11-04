@@ -44,6 +44,8 @@ describe("LedgerStack", () => {
         "POST /api/v1/auth/login": tight,
         "POST /api/v1/auth/refresh": tight,
         "POST /api/v1/auth/logout": tight,
+        "GET /api/v1/auth/google/start": tight,
+        "GET /api/v1/auth/google/callback": tight,
       },
     });
   });
@@ -54,24 +56,42 @@ describe("LedgerStack", () => {
     });
   });
 
-  it("has a Lambda authorizer that reads the bearer token and caches for 60 seconds", () => {
+  it("has a Lambda authorizer that caches nothing, so a disabled or deleted user is refused at once", () => {
     template.hasResourceProperties("AWS::ApiGatewayV2::Authorizer", {
       AuthorizerType: "REQUEST",
       AuthorizerPayloadFormatVersion: "2.0",
       EnableSimpleResponses: true,
       IdentitySource: ["$request.header.Authorization"],
-      AuthorizerResultTtlInSeconds: 60,
+      AuthorizerResultTtlInSeconds: 0,
     });
+  });
+
+  it("lets the authorizer read the Users table, but not write to it", () => {
+    const authorizer = found(template, "AuthorizerFunction");
+
+    expect(authorizer.Properties.Environment.Variables.USERS_TABLE.Ref).toMatch(/^UsersTable/);
+    const document = JSON.stringify(functionPolicy(template, authorizer));
+    expect(document).toContain("dynamodb:GetItem");
+    expect(document).not.toContain("dynamodb:PutItem");
+    expect(document).not.toContain("dynamodb:DeleteItem");
   });
 
   it("puts the admin routes behind the authorizer", () => {
     for (const routeKey of [
+      "DELETE /api/v1/admin/users/{id}",
       "GET /api/v1/admin/users",
       "POST /api/v1/admin/users/{id}/enable",
       "POST /api/v1/admin/users/{id}/disable",
     ]) {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: routeKey, AuthorizationType: "CUSTOM" });
     }
+  });
+
+  it("gives the admin function both tables, since deleting a user takes their data", () => {
+    const variables = found(template, "AdminFunction").Properties.Environment.Variables;
+
+    expect(variables.USERS_TABLE.Ref).toMatch(/^UsersTable/);
+    expect(variables.DATA_TABLE.Ref).toMatch(/^DataTable/);
   });
 
   it("runs the bootstrap on deploy, allowed to create both SSM parameters", () => {
@@ -116,9 +136,12 @@ describe("LedgerStack", () => {
       "POST /api/v1/transactions",
       "GET /api/v1/transactions",
       "GET /api/v1/transactions/summary",
+      "GET /api/v1/transactions/purchases",
       "GET /api/v1/transactions/{id}",
       "PATCH /api/v1/transactions/{id}",
       "DELETE /api/v1/transactions/{id}",
+      "GET /api/v1/insights",
+      "POST /api/v1/insights/{id}/dismiss",
       "GET /api/v1/admin/users/{id}/transactions",
       "GET /api/v1/admin/transactions",
       "PATCH /api/v1/admin/users/{id}/transactions/{transactionId}",
@@ -168,6 +191,12 @@ describe("LedgerStack", () => {
         AuthorizationType: "NONE",
       });
     }
+    for (const route of ["start", "callback"]) {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
+        RouteKey: `GET /api/v1/auth/google/${route}`,
+        AuthorizationType: "NONE",
+      });
+    }
   });
 
   it("serves /api/* through CloudFront with caching off and auth headers and cookies forwarded", () => {
@@ -205,4 +234,47 @@ describe("LedgerStack", () => {
 
     withEmail.hasResourceProperties("AWS::SNS::Subscription", { Protocol: "email", Endpoint: "me@example.com" });
   });
+
+  it("leaves Google sign-in's settings and secret out when it isn't configured", () => {
+    const auth = found(template, "AuthFunction");
+
+    expect(auth.Properties.Environment.Variables).not.toHaveProperty("GOOGLE_CLIENT_ID");
+    expect(JSON.stringify(functionPolicy(template, auth))).not.toContain("google-client-secret");
+  });
 });
+
+describe("given Google sign-in", () => {
+  it("gives the auth function the client ID, the redirect URI and only the client secret's parameter", () => {
+    const googleSignIn = { clientId: "client-1", redirectUri: "https://ledger.example.test/callback" };
+    const template = Template.fromStack(
+      new LedgerStack(new App(), "LedgerApi", { env: { region: "ap-southeast-2" }, googleSignIn }),
+    );
+
+    const auth = found(template, "AuthFunction");
+
+    expect(auth.Properties.Environment.Variables).toMatchObject({
+      GOOGLE_CLIENT_ID: "client-1",
+      GOOGLE_REDIRECT_URI: "https://ledger.example.test/callback",
+    });
+    expect(JSON.stringify(functionPolicy(template, auth))).toContain("ledger-api/google-client-secret");
+    expect(JSON.stringify(template.toJSON())).not.toContain("GOOGLE_CLIENT_SECRET");
+  });
+});
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- CloudFormation resources are untyped JSON
+type Resource = { Properties: any };
+
+/** The function whose logical ID starts with `prefix`. */
+function found(template: Template, prefix: string): Resource {
+  const [, fn] = Object.entries(template.findResources("AWS::Lambda::Function")).find(([id]) => id.startsWith(prefix))!;
+  return fn as Resource;
+}
+
+/** The policy document attached to a function's role. */
+function functionPolicy(template: Template, fn: Resource): unknown {
+  const role = fn.Properties.Role["Fn::GetAtt"][0];
+  const policy = Object.values(template.findResources("AWS::IAM::Policy")).find((p) =>
+    JSON.stringify(p.Properties.Roles).includes(`"${role}"`),
+  );
+  return policy?.Properties.PolicyDocument;
+}
