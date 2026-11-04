@@ -52,6 +52,30 @@ const refreshTokenItem = (userId: string, tokenHash: string, expiresAt: Date) =>
 });
 
 export function createUsersStore(tableName: string) {
+  /**
+   * The user's Google claims, if any. Only `sub` finds a claim and the profile doesn't hold it, so this scans,
+   * as listing users does; deleting a user is rare.
+   */
+  const googleKeys = async (userId: string) => {
+    const keys: Record<string, unknown>[] = [];
+    let startKey: Record<string, unknown> | undefined;
+    do {
+      const page: ScanCommandOutput = await ddb.send(
+        new ScanCommand({
+          TableName: tableName,
+          FilterExpression: "sk = :google AND userId = :userId",
+          ExpressionAttributeValues: { ":google": "GOOGLE", ":userId": userId },
+          ProjectionExpression: "pk, sk",
+          ConsistentRead: true,
+          ExclusiveStartKey: startKey,
+        }),
+      );
+      keys.push(...(page.Items ?? []));
+      startKey = page.LastEvaluatedKey;
+    } while (startKey);
+    return keys;
+  };
+
   return {
     /** Creates the user and claims the username in one transaction, so two users can never share a name. */
     async create(input: {
@@ -177,6 +201,11 @@ export function createUsersStore(tableName: string) {
       return { id, username, email, role, status, createdAt };
     },
 
+    /** False for a disabled or deleted user, whose access token may not have expired yet. */
+    async isActive(userId: string): Promise<boolean> {
+      return (await this.getById(userId))?.status === "active";
+    },
+
     /** The ID of the user who holds `username`, from its claim alone (no profile or password hash read). */
     async userIdFor(username: string): Promise<string | undefined> {
       const { Item } = await ddb.send(new GetCommand({ TableName: tableName, Key: usernameKey(username) }));
@@ -259,7 +288,20 @@ export function createUsersStore(tableName: string) {
       await ddb.send(new DeleteCommand({ TableName: tableName, Key: refreshTokenKey(userId, tokenHash) }));
     },
 
-    /** Deletes every refresh token the user has, logging them out everywhere within one access-token lifetime. */
+    /**
+     * Deletes the user and every item of theirs, which frees their username and Google account. The profile and
+     * claims go together, so a Google claim can never outlive its profile: findByGoogleSub would find nobody,
+     * and createGoogleUser would be refused, shutting that person out for good.
+     */
+    async delete(user: User): Promise<void> {
+      await this.revokeRefreshTokens(user.id);
+      const keys = [profileKey(user.id), usernameKey(user.username), ...(await googleKeys(user.id))];
+      await ddb.send(
+        new TransactWriteCommand({ TransactItems: keys.map((Key) => ({ Delete: { TableName: tableName, Key } })) }),
+      );
+    },
+
+    /** Deletes every refresh token the user has, logging them out everywhere. */
     async revokeRefreshTokens(userId: string): Promise<void> {
       let startKey: Record<string, unknown> | undefined;
       do {

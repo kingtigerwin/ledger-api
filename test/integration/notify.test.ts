@@ -23,7 +23,7 @@ describe("emails from the Users table's stream", () => {
   describe("given a customer who registers, fails a login, and is enabled, disabled and enabled again", () => {
     it("emails them when they register and when first approved, and the admin when they register", async () => {
       const auth = createAuthHandler({ tableName, signingSecret: "test-secret", now: () => new Date() });
-      const admin = createAdminHandler({ tableName });
+      const admin = createAdminHandler({ tableName, dataTableName: "not-used-here" });
       const registered = await call(auth, "POST /api/v1/auth/register", {
         username: "haoran",
         password: "pw",

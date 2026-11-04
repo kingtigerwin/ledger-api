@@ -1,4 +1,11 @@
-import { GetCommand, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  BatchWriteCommand,
+  type BatchWriteCommandOutput,
+  GetCommand,
+  QueryCommand,
+  type QueryCommandOutput,
+  TransactWriteCommand,
+} from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../db-client";
 import type { CreateTransactionInput, ListQuery, Transaction, TransactionFields } from "./transaction-schema";
 
@@ -41,6 +48,37 @@ const rangeEnd = (date: string) => `${date}#\uffff`;
 
 export function createTransactionsStore(tableName: string) {
   return {
+    /** Deletes everything in the user's partition and returns how many items that was; safe to run again. */
+    async deleteAll(userId: string): Promise<number> {
+      let deleted = 0;
+      let startKey: Record<string, unknown> | undefined;
+      do {
+        const page: QueryCommandOutput = await ddb.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "pk = :pk",
+            ExpressionAttributeValues: { ":pk": userPk(userId) },
+            ProjectionExpression: "pk, sk",
+            ExclusiveStartKey: startKey,
+          }),
+        );
+        const keys = page.Items ?? [];
+        // BatchWrite takes at most 25 requests, and may hand some back to retry.
+        for (let i = 0; i < keys.length; i += 25) {
+          let requests: BatchWriteCommandOutput["UnprocessedItems"] = {
+            [tableName]: keys.slice(i, i + 25).map((Key) => ({ DeleteRequest: { Key } })),
+          };
+          while (requests?.[tableName]?.length) {
+            const res: BatchWriteCommandOutput = await ddb.send(new BatchWriteCommand({ RequestItems: requests }));
+            requests = res.UnprocessedItems;
+          }
+        }
+        deleted += keys.length;
+        startKey = page.LastEvaluatedKey;
+      } while (startKey);
+      return deleted;
+    },
+
     async create(userId: string, input: CreateTransactionInput, now: Date): Promise<Transaction> {
       const transaction: Transaction = { ...input, version: 1, createdAt: now.toISOString(), updatedAt: now.toISOString() };
       try {
