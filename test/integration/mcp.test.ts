@@ -7,6 +7,7 @@ import { isUlid } from "../../src/data/ulid";
 import { createMcpHandler } from "../../src/mcp/handler";
 import { createDataTable, createUsersTable, deleteTable } from "../support/dynamo";
 import { call } from "../support/http";
+import { newUlid } from "../support/ulid";
 
 const customer = (userId: string): AuthContext => ({
   userId,
@@ -69,7 +70,44 @@ const getOwn = (userId: string, id: string) =>
 const listOwn = (userId: string) =>
   call(data, "GET /api/v1/transactions", undefined, { auth: customer(userId), query: { from: "2026-10-01" } });
 
+// A scanned receipt, as ledger-ui saves one over REST.
+const scanned = () => ({
+  id: newUlid(),
+  date: "2026-10-27",
+  merchant: "Coles",
+  category: "groceries",
+  item: "3 items",
+  amountCents: 50,
+  currency: "AUD",
+  receipt: {
+    savingsCents: 3100,
+    location: "The Glen",
+    lines: [{ name: "CLS CHICKEN MINCE", product: "chicken mince", amountCents: 650 }],
+  },
+});
+const recordOwn = (userId: string, body: unknown) =>
+  call(data, "POST /api/v1/transactions", body, { auth: customer(userId) });
+
 describe("POST /api/mcp", () => {
+  describe("given a scanned receipt", () => {
+    it("leaves its lines out of list_transactions, so Claude reads only the small fields", async () => {
+      await recordOwn("mcp-receipt", scanned());
+
+      const [listed] = payload(await callTool(customer("mcp-receipt"), "list_transactions", {})).items;
+
+      expect(listed.receipt).toEqual({ savingsCents: 3100, location: "The Glen" });
+    });
+
+    it("keeps its lines in get_transaction", async () => {
+      const body = scanned();
+      await recordOwn("mcp-receipt-one", body);
+
+      const fetched = payload(await callTool(customer("mcp-receipt-one"), "get_transaction", { id: body.id }));
+
+      expect(fetched.receipt).toEqual(body.receipt);
+    });
+  });
+
   describe("given a signed-in customer starting a session", () => {
     it("introduces itself as ledger-api and offers tools", async () => {
       const res = await rpc(customer("mcp-init"), "initialize", {

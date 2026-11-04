@@ -10,6 +10,7 @@ import { log } from "../log";
 import { createLedger, type LedgerDeps } from "../data/ledger";
 import {
   listQuerySchema,
+  type Receipt,
   summaryQuerySchema,
   transactionFieldsSchema,
   updateTransactionSchema,
@@ -25,6 +26,21 @@ const byId = z.object({ id: z.string().describe("The transaction's id") });
 
 const listAllQuerySchema = listQuerySchema.extend({
   username: credentialsSchema.shape.username.optional().describe("Only this customer's transactions"),
+});
+
+/**
+ * A receipt can hold dozens of lines, and everything a list returns goes to Claude, so lists leave them out
+ * and keep the small fields, which answer questions like "how much did I save at Coles?". get_transaction
+ * still has them.
+ */
+const withoutLines = <T extends { receipt?: Receipt }>(page: { items: T[]; nextCursor: string | null }) => ({
+  ...page,
+  items: page.items.map((t) => {
+    if (!t.receipt) return t;
+    const receipt = { ...t.receipt };
+    delete receipt.lines;
+    return { ...t, receipt };
+  }),
 });
 
 const READ: ToolAnnotations = { readOnlyHint: true, openWorldHint: false };
@@ -109,7 +125,7 @@ export function createMcpHandler(deps: McpDeps) {
         inputSchema: listQuerySchema,
         annotations: READ,
       },
-      (query) => ledger.list(userId, query),
+      async (query) => withoutLines(await ledger.list(userId, query)),
     );
 
     tool(
@@ -173,10 +189,10 @@ export function createMcpHandler(deps: McpDeps) {
           // One customer's own partition, not a filter over everyone's.
           const customerId = await users.userIdFor(username);
           if (!customerId) throw new ApiError(404, "user_not_found", "No such user");
-          const page = await ledger.list(customerId, query);
+          const page = withoutLines(await ledger.list(customerId, query));
           return { ...page, items: page.items.map((t) => ({ ...t, userId: customerId, username })) };
         }
-        const page = await ledger.listAll(query);
+        const page = withoutLines(await ledger.listAll(query));
         const usernames = await users.usernames(page.items.map((t) => t.userId));
         return {
           ...page,

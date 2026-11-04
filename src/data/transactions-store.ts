@@ -35,9 +35,22 @@ const toItem = (userId: string, t: Transaction) => ({
 
 const fromItem = (item: Record<string, unknown>): Transaction => {
   // Picks known fields only, so attributes from older versions (memberId, gsi1*) never leak out.
-  const { id, date, merchant, category, item: what, amountCents, currency, note, version, createdAt, updatedAt } =
+  const { id, date, merchant, category, item: what, amountCents, currency, note, receipt, version, createdAt, updatedAt } =
     item as unknown as Transaction;
-  return { id, date, merchant, category, item: what, amountCents, currency, note, version, createdAt, updatedAt };
+  return {
+    id,
+    date,
+    merchant,
+    category,
+    item: what,
+    amountCents,
+    currency,
+    note,
+    ...(receipt ? { receipt } : {}),
+    version,
+    createdAt,
+    updatedAt,
+  };
 };
 
 // Sort keys are `<date>#<id>`, so a date range is a key range: from the start of `from`
