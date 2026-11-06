@@ -97,20 +97,22 @@ export function createLedger(deps: LedgerDeps) {
      * so reading them all is cheap; precomputed totals would be the upgrade if that changes.
      */
     async summary(userId: string, month: string) {
-      const byCategory = new Map<string, number>();
+      const byCategory = new Map<string, { category: string; totalCents: number; count: number }>();
       let totalCents = 0;
       // Day 31 is a safe upper bound for every month: sort keys compare as strings.
       for await (const t of allBetween(userId, `${month}-01`, `${month}-31`)) {
         totalCents += t.amountCents;
-        byCategory.set(t.category, (byCategory.get(t.category) ?? 0) + t.amountCents);
+        const entry = byCategory.get(t.category) ?? { category: t.category, totalCents: 0, count: 0 };
+        entry.totalCents += t.amountCents;
+        entry.count += 1;
+        byCategory.set(t.category, entry);
       }
 
       return {
         month,
         currency: "AUD",
         totalCents,
-        byCategory: [...byCategory]
-          .map(([category, total]) => ({ category, totalCents: total }))
+        byCategory: [...byCategory.values()]
           .sort((a, b) => b.totalCents - a.totalCents || a.category.localeCompare(b.category)),
       };
     },
