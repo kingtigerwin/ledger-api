@@ -108,7 +108,7 @@ describe("GET /transactions", () => {
 
 describe("GET /transactions/summary", () => {
   describe("given a month", () => {
-    it("totals that month's spending by category, largest first", async () => {
+    it("totals and counts that month's spending by category, largest first", async () => {
       const res = await call(handler, "GET /api/v1/transactions/summary", undefined, {
         auth: customer(HOUSE),
         query: { month: "2026-10" },
@@ -120,9 +120,9 @@ describe("GET /transactions/summary", () => {
         currency: "AUD",
         totalCents: 14000,
         byCategory: [
-          { category: "groceries", totalCents: 9000 },
-          { category: "dining", totalCents: 3000 },
-          { category: "transport", totalCents: 2000 },
+          { category: "groceries", totalCents: 9000, count: 2 },
+          { category: "dining", totalCents: 3000, count: 1 },
+          { category: "transport", totalCents: 2000, count: 1 },
         ],
       });
     });

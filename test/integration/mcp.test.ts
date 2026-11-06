@@ -255,8 +255,8 @@ describe("POST /api/mcp", () => {
         currency: "AUD",
         totalCents: 5000,
         byCategory: [
-          { category: "groceries", totalCents: 3500 },
-          { category: "dining", totalCents: 1500 },
+          { category: "groceries", totalCents: 3500, count: 2 },
+          { category: "dining", totalCents: 1500, count: 1 },
         ],
       });
     });

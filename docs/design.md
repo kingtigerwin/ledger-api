@@ -77,7 +77,7 @@ An expense (no income records), owned by the customer who recorded it. There are
 - `amountCents` is what was paid in money, so totals match the customer's bank: a $30.50 shop with $30.00 of Flybuys points has `amountCents` 50 and `receipt.totalCents` 3050. Monthly totals count `amountCents`.
 - Updates send the `version` last read and fail with 409 `version_conflict` if it has changed.
 - `GET /transactions` uses the by-category index when `category` is given and the main key otherwise; dates are always a sort-key range. `limit` is 1–100 (default 50). Filtered pages can be shorter than `limit`; follow `nextCursor` until it's `null`. A cursor from a different filter is rejected as `invalid_cursor`.
-- `GET /transactions/summary?month=YYYY-MM` returns `{ month, currency, totalCents, byCategory: [{ category, totalCents }] }`, largest first.
+- `GET /transactions/summary?month=YYYY-MM` returns `{ month, currency, totalCents, byCategory: [{ category, totalCents, count }] }`, largest first, where `count` is how many transactions make up the category's total.
 
 ### Searching purchases
 
