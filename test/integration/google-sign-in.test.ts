@@ -119,6 +119,36 @@ describe("GET /auth/google/callback", () => {
       expect((await item(`USERNAME#${profile.username}`, "USERNAME")).userId).toBe(claim.userId);
     });
 
+    it.each([
+      ["zh-CN,zh;q=0.9,en;q=0.8", "zh-CN"],
+      ["ja,zh-TW;q=0.8", "zh-CN"],
+      ["en-AU,en;q=0.9", "en"],
+    ])("keeps the language their browser asks for (%s), for the welcome email", async (acceptLanguage, locale) => {
+      const { cookie, state } = await start();
+
+      await call(handler, GOOGLE_CALLBACK, undefined, {
+        cookies: [cookie],
+        query: { code: "the-code", state },
+        headers: { "accept-language": acceptLanguage },
+      });
+
+      const claim = await item("GOOGLE#1234567890", "GOOGLE");
+      expect((await item(`USER#${claim.userId}`, "PROFILE")).locale).toBe(locale);
+    });
+
+    it("keeps no language when their browser asks for none Ledger has", async () => {
+      const { cookie, state } = await start();
+
+      await call(handler, GOOGLE_CALLBACK, undefined, {
+        cookies: [cookie],
+        query: { code: "the-code", state },
+        headers: { "accept-language": "fr-FR,fr;q=0.9" },
+      });
+
+      const claim = await item("GOOGLE#1234567890", "GOOGLE");
+      expect(await item(`USER#${claim.userId}`, "PROFILE")).not.toHaveProperty("locale");
+    });
+
     it("passes the code and the PKCE verifier to Google", async () => {
       const { cookie, state } = await start();
 

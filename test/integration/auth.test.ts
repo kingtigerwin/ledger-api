@@ -60,6 +60,7 @@ describe("POST /auth/register", () => {
       ["no email", { username: "carol", password: "pw" }],
       ["an email that isn't an address", { username: "carol", password: "pw", email: "carol-at-example" }],
       ["a 255-character email", { username: "carol", password: "pw", email: TOO_LONG_EMAIL }],
+      ["a language Ledger doesn't have", { username: "carol", password: "pw", email: "carol@example.com", locale: "fr" }],
     ])("rejects %s", async (_, body) => {
       const res = await call(handler, REGISTER, body);
 
@@ -67,16 +68,29 @@ describe("POST /auth/register", () => {
       expect(res.body.error.code).toBe("validation_failed");
     });
   });
+
+  describe("given the language the customer's browser is in", () => {
+    it("keeps it, so their emails are in that language", async () => {
+      const res = await call(handler, REGISTER, { username: "li", password: "pw", email: "li@example.com", locale: "zh-CN" });
+
+      expect(res.status).toBe(201);
+      expect(res.body.locale).toBe("zh-CN");
+      expect((await me(res.body.id)).body.locale).toBe("zh-CN");
+    });
+  });
 });
+
+const ME = "GET /api/v1/auth/me";
+const UPDATE_ME = "PATCH /api/v1/auth/me";
+const customer = (userId: string) => ({ userId, role: "customer" as const, scope: "transactions:read transactions:write" });
+const me = (userId: string) => call(handler, ME, undefined, { auth: customer(userId) });
 
 describe("GET /auth/me", () => {
   describe("given a customer who registered with an email", () => {
-    it("includes the email", async () => {
+    it("includes the email, and no language until they choose one", async () => {
       const registered = await call(handler, REGISTER, { username: "mia", password: "pw", email: "mia@example.com" });
 
-      const res = await call(handler, "GET /api/v1/auth/me", undefined, {
-        auth: { userId: registered.body.id, role: "customer", scope: "transactions:read transactions:write" },
-      });
+      const res = await me(registered.body.id);
 
       expect(res.body).toEqual({
         id: registered.body.id,
@@ -85,6 +99,53 @@ describe("GET /auth/me", () => {
         role: "customer",
         status: "pending",
       });
+    });
+  });
+});
+
+describe("PATCH /auth/me", () => {
+  describe("given a customer who chooses Simplified Chinese", () => {
+    it("saves it and returns it from then on", async () => {
+      const { id } = await createUserWithStatus(tableName, "wang", "pw", "active");
+
+      const res = await call(handler, UPDATE_ME, { locale: "zh-CN" }, { auth: customer(id) });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id, username: "wang", locale: "zh-CN" });
+      expect((await me(id)).body.locale).toBe("zh-CN");
+    });
+  });
+
+  describe("given a customer who goes back to following their device", () => {
+    it("forgets the language they chose", async () => {
+      const { id } = await createUserWithStatus(tableName, "zhao", "pw", "active");
+      await call(handler, UPDATE_ME, { locale: "en" }, { auth: customer(id) });
+
+      const res = await call(handler, UPDATE_ME, { locale: null }, { auth: customer(id) });
+
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty("locale");
+      expect((await me(id)).body).not.toHaveProperty("locale");
+    });
+  });
+
+  describe("given a language Ledger doesn't have, or none at all", () => {
+    it.each([["French", { locale: "fr" }], ["an empty body", {}]])("rejects %s", async (_, body) => {
+      const { id } = await createUserWithStatus(tableName, `qian-${Object.keys(body).length}`, "pw", "active");
+
+      const res = await call(handler, UPDATE_ME, body, { auth: customer(id) });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("validation_failed");
+    });
+  });
+
+  describe("given a user deleted since their token was issued", () => {
+    it("refuses with unauthorized and creates nothing", async () => {
+      const res = await call(handler, UPDATE_ME, { locale: "en" }, { auth: customer("no-such-user") });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe("unauthorized");
     });
   });
 });

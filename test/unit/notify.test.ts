@@ -111,8 +111,45 @@ describe("emailsFor", () => {
     });
   });
 
+  describe("given a customer whose language is Simplified Chinese", () => {
+    const zh = (overrides: Record<string, unknown> = {}) => profile({ locale: "zh-CN", ...overrides });
+
+    it("tells them in Chinese that they're waiting for approval, and the admin in English", () => {
+      const [admin, customer] = emailsFor(undefined, zh(), SETTINGS);
+
+      expect(customer).toMatchObject({ kind: "pending", subject: "您的 Ledger 账户正在等待审核" });
+      expect(customer?.text).toContain("haoran");
+      expect(admin?.subject).toBe("New Ledger sign-up: haoran is waiting for approval");
+    });
+
+    it("tells them in Chinese when they're approved", () => {
+      const [approved] = emailsFor(zh(), zh({ status: "active" }), SETTINGS);
+
+      expect(approved).toMatchObject({ kind: "approved", subject: "您的 Ledger 账户已通过审核" });
+      expect(approved?.text).toContain("以 haoran 登录");
+    });
+
+    it("welcomes them in Chinese, telling them to use Google", () => {
+      const after = zh({ authProvider: "google", passwordHash: undefined, status: "active" });
+
+      const [, welcome] = emailsFor(undefined, after, SETTINGS);
+
+      expect(welcome).toMatchObject({ kind: "welcome", subject: "欢迎使用 Ledger" });
+      expect(welcome?.text).toContain("使用 Google 登录");
+    });
+  });
+
+  describe("given a customer with no language, or one Ledger doesn't have", () => {
+    it.each([undefined, "fr"])("writes in English (%s)", (locale) => {
+      const [, customer] = emailsFor(undefined, profile({ locale }), SETTINGS);
+
+      expect(customer?.subject).toBe("Your Ledger account is waiting for approval");
+    });
+  });
+
   describe("given a change that isn't a sign-up or a first approval", () => {
     it.each([
+      ["a customer choosing a language", profile({ status: "active" }), profile({ status: "active", locale: "zh-CN" })],
       ["a disabled customer enabled again", profile({ status: "disabled" }), profile({ status: "active" })],
       ["an active customer disabled", profile({ status: "active" }), profile({ status: "disabled" })],
       ["a pending customer disabled", profile(), profile({ status: "disabled" })],

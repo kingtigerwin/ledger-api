@@ -198,7 +198,7 @@ export class LedgerStack extends Stack {
         api.addRoutes({ path: routePath, methods: [HttpMethod.GET], integration: auth }),
       ),
     ];
-    api.addRoutes({ path: "/api/v1/auth/me", methods: [HttpMethod.GET], integration: auth, authorizer });
+    api.addRoutes({ path: "/api/v1/auth/me", methods: [HttpMethod.GET, HttpMethod.PATCH], integration: auth, authorizer });
     api.addRoutes({
       path: "/api/openapi.json",
       methods: [HttpMethod.GET],

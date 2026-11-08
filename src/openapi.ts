@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { statusQuery } from "./admin/schemas";
-import { googleCallbackQuery, loginSchema, registerSchema } from "./auth/schemas";
+import { googleCallbackQuery, loginSchema, registerSchema, updateMeSchema } from "./auth/schemas";
 import {
   createTransactionSchema,
   insightsQuerySchema,
@@ -32,7 +32,8 @@ export const operations: Operation[] = [
   { method: "post", path: "/api/v1/auth/logout", operationId: "logout", summary: "End the session's refresh token", body: refreshBody, public: true },
   { method: "get", path: "/api/v1/auth/google/start", operationId: "startGoogleSignIn", summary: "Redirect to Google to sign in; browsers navigate here", public: true },
   { method: "get", path: "/api/v1/auth/google/callback", operationId: "finishGoogleSignIn", summary: "Google's redirect back: sets the refresh cookie and redirects to the app, or to /login?error=...", query: googleCallbackQuery, public: true },
-  { method: "get", path: "/api/v1/auth/me", operationId: "getCurrentUser", summary: "The signed-in user" },
+  { method: "get", path: "/api/v1/auth/me", operationId: "getCurrentUser", summary: "The signed-in user, with the language they chose (locale) if any" },
+  { method: "patch", path: "/api/v1/auth/me", operationId: "updateCurrentUser", summary: "Set the signed-in user's language (\"en\" or \"zh-CN\"); null goes back to following their device", body: updateMeSchema },
   { method: "get", path: "/api/v1/admin/users", operationId: "adminListUsers", summary: "Admin: list users by status", query: statusQuery },
   { method: "post", path: "/api/v1/admin/users/{id}/enable", operationId: "adminEnableUser", summary: "Admin: activate a user" },
   { method: "post", path: "/api/v1/admin/users/{id}/disable", operationId: "adminDisableUser", summary: "Admin: block a user and end their refresh tokens" },
