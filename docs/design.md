@@ -31,7 +31,10 @@ A public API where customers record their spending. It's a learning and portfoli
   - Someone new becomes an `active` customer with no approval: Google has verified their address, and ledger-agent's daily limits (5 messages per customer, 300 in total) bound what they can cost. A Google user left `pending` from before this is activated at their next sign-in. Password sign-ups still wait for approval, since their addresses aren't verified and they're easy to script. They're found again by Google's `sub`, through a `GOOGLE#<sub>` claim item. Their username is the address's local part plus a hash of `sub` (`alice-g1a2b3c4d`), they have no `passwordHash`, and `authProvider` is `google`, so no password logs them in and their emails say to use Google.
   - Accounts are never linked by email: registered addresses aren't verified, so a password account with a matching address could belong to someone else. A customer with both gets two accounts. The admin stays password-only.
   - The client ID and redirect URI are in `cdk.json`; the client secret is in SSM (`/ledger-api/google-client-secret`), put there by hand and read on first use, so a problem with it can't stop password logins. Without a client ID, both routes redirect to `/login?error=google_unavailable`. Failures log `google_login_failed`, not `login_failed`, so they don't count towards the failed-login alarm.
-- `GET /api/v1/auth/me` returns the signed-in user: `id`, `username`, `email`, `role`, `status`. The admin's user list includes `email` too. Users from before emails, and the bootstrap admin, have none.
+- `GET /api/v1/auth/me` returns the signed-in user: `id`, `username`, `email`, `role`, `status`, and `locale` if they have one. The admin's user list includes `email` too. Users from before emails, and the bootstrap admin, have none.
+- Language: Ledger is in English (`en`) and Simplified Chinese (`zh-CN`). The API returns codes (error `code`, categories, insight types) and the clients write the words, so only the customer's emails are translated here; error `message`s stay English and the codes must stay stable.
+  - The profile's optional `locale` is the customer's language. `POST /auth/register` takes the language the UI is showing; Google sign-in takes the first one `Accept-Language` names that Ledger has (any Chinese, Traditional included, is `zh-CN`). `PATCH /api/v1/auth/me` with `{ "locale": "en" | "zh-CN" }` saves a choice from the UI's language menu, and `{ "locale": null }` removes it.
+  - ledger-ui shows, in order: the customer's saved `locale` (after sign-in), the choice it remembers in the browser, the first of the browser's languages (`navigator.languages`, which follows the system's) that Ledger has, then English. Removing the choice ("Auto") goes back to the browser's languages.
 - A custom Lambda authorizer (simple responses) validates the bearer access token on every other route and passes `userId`, `role` and `scope` to it. It also reads the user from the Users table, and refuses unless they're still `active`, so disabling or deleting someone ends their access token at once rather than up to 15 minutes later. Results aren't cached, or that check would be up to a cache lifetime late. It costs one read per request, a tiny fraction of a cent a month at this scale, and a few milliseconds. API Gateway answers a refusal with 403 and `{"message":"Forbidden"}` (401 only when there's no `Authorization` header), and that includes an expired token; the UI treats it as its cue to refresh.
 - Abuse protection: API Gateway throttling on the stage, tighter on `/auth/*`; 5 failed logins lock a username for 15 minutes.
 
@@ -113,7 +116,7 @@ All under `/api/v1`.
 
 | Area | Endpoints |
 |---|---|
-| Auth | `POST /auth/register`, `POST /auth/login`, `GET /auth/google/start`, `GET /auth/google/callback`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` |
+| Auth | `POST /auth/register`, `POST /auth/login`, `GET /auth/google/start`, `GET /auth/google/callback`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`, `PATCH /auth/me` |
 | Transactions | `POST /transactions`, `GET /transactions/{id}`, `GET /transactions` (`cursor`, `limit`, `from`, `to`, `category`), `GET /transactions/summary?month=YYYY-MM`, `GET /transactions/purchases?q=&from=&to=`, `PATCH /transactions/{id}`, `DELETE /transactions/{id}` |
 | Insights | `GET /insights?today=YYYY-MM-DD`, `POST /insights/{id}/dismiss` |
 | Admin | `GET /admin/users?status=pending`, `POST /admin/users/{id}/enable`, `POST /admin/users/{id}/disable`, `DELETE /admin/users/{id}`, `GET /admin/users/{id}/transactions`, `GET /admin/transactions` (everyone's, each with `userId`; same filters), `PATCH /admin/users/{id}/transactions/{transactionId}`, `DELETE /admin/users/{id}/transactions/{transactionId}` |
@@ -150,6 +153,8 @@ Emails come from `noreply@haoran.cloud` (`emailFrom` in `cdk.json`):
 | Someone new signs in with Google (a new `active` customer) | the customer | "Welcome to Ledger" |
 | Someone new signs in with Google | the admin (`ADMIN_EMAIL`) | "New Ledger user: <username> joined with Google", with their username, email and ID and how to disable them; no approval is needed |
 | The admin enables them for the first time (`pending` → `active`) | the customer | "Your Ledger account is approved", saying they can sign in |
+
+Customers' emails are in their `locale` (English with none, or for any language Ledger doesn't have); the admin's are in English. The subjects above are the English ones.
 
 Rejecting is disabling a pending customer; there is no separate reject route, and the customer isn't emailed. Nothing is sent when a disabled customer is enabled again, or to users without an email. Emails are plain text.
 

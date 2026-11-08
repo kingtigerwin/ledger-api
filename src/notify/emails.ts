@@ -20,12 +20,57 @@ export interface EmailSettings {
 
 type Item = Record<string, unknown> | undefined;
 
+/** What a customer is told, in each language Ledger has. The admin's emails stay in English. */
+const CUSTOMER_EMAILS = {
+  en: {
+    signInAsGoogle: "sign in with Google",
+    signInAs: (username: string) => `sign in as ${username}`,
+    pending: (username: string) => ({
+      subject: "Your Ledger account is waiting for approval",
+      text:
+        `Hi ${username},\n\n` +
+        "Thanks for signing up to Ledger. Your account has been created and is waiting for an admin to approve it.\n\n" +
+        "We'll email you again as soon as you can sign in.\n",
+    }),
+    welcome: (username: string, signIn: string) => ({
+      subject: "Welcome to Ledger",
+      text: `Hi ${username},\n\nYour Ledger account is ready. Next time, just ${signIn}.\n`,
+    }),
+    approved: (username: string, signIn: string) => ({
+      subject: "Your Ledger account is approved",
+      text: `Hi ${username},\n\nYour Ledger account has been approved. You can now ${signIn}.\n`,
+    }),
+  },
+  "zh-CN": {
+    signInAsGoogle: "使用 Google 登录",
+    signInAs: (username: string) => `以 ${username} 登录`,
+    pending: (username: string) => ({
+      subject: "您的 Ledger 账户正在等待审核",
+      text:
+        `${username}，您好：\n\n` +
+        "感谢您注册 Ledger。您的账户已创建，正在等待管理员审核。\n\n" +
+        "审核通过后，我们会再发邮件通知您登录。\n",
+    }),
+    welcome: (username: string, signIn: string) => ({
+      subject: "欢迎使用 Ledger",
+      text: `${username}，您好：\n\n您的 Ledger 账户已准备就绪。下次只需${signIn}即可。\n`,
+    }),
+    approved: (username: string, signIn: string) => ({
+      subject: "您的 Ledger 账户已通过审核",
+      text: `${username}，您好：\n\n您的 Ledger 账户已通过审核，现在可以${signIn}了。\n`,
+    }),
+  },
+};
+
+const customerEmailsFor = (locale: unknown) => (locale === "zh-CN" ? CUSTOMER_EMAILS["zh-CN"] : CUSTOMER_EMAILS.en);
+
 /**
  * The emails a change to a Users-table item calls for. A customer who has just registered hears
  * they're waiting for approval, and the admin is asked to approve or reject them; the customer
  * hears again when first enabled. Someone new through Google starts active, so they're welcomed,
  * and the admin only hears they've joined, in case they need disabling. Re-enabling a disabled
- * customer sends nothing, and customers without an email are never written to.
+ * customer sends nothing, and customers without an email are never written to. Customers are written
+ * to in their `locale`, English when they have none.
  */
 export function emailsFor(
   before: Item,
@@ -37,8 +82,9 @@ export function emailsFor(
   const username = String(after.username);
   const customerEmail =
     typeof after.email === "string" ? after.email : undefined;
+  const words = customerEmailsFor(after.locale);
   // Someone who came through Google has no password to go with their username.
-  const signIn = after.authProvider === "google" ? "sign in with Google" : `sign in as ${username}`;
+  const signIn = after.authProvider === "google" ? words.signInAsGoogle : words.signInAs(username);
   const emails: Email[] = [];
 
   if (!before && after.status === "pending") {
@@ -69,11 +115,7 @@ export function emailsFor(
         kind: "pending",
         userId,
         to: customerEmail,
-        subject: "Your Ledger account is waiting for approval",
-        text:
-          `Hi ${username},\n\n` +
-          "Thanks for signing up to Ledger. Your account has been created and is waiting for an admin to approve it.\n\n" +
-          "We'll email you again as soon as you can sign in.\n",
+        ...words.pending(username),
       });
     }
   }
@@ -101,8 +143,7 @@ export function emailsFor(
         kind: "welcome",
         userId,
         to: customerEmail,
-        subject: "Welcome to Ledger",
-        text: `Hi ${username},\n\nYour Ledger account is ready. Next time, just ${signIn}.\n`,
+        ...words.welcome(username, signIn),
       });
     }
   }
@@ -115,8 +156,7 @@ export function emailsFor(
       kind: "approved",
       userId,
       to: customerEmail,
-      subject: "Your Ledger account is approved",
-      text: `Hi ${username},\n\nYour Ledger account has been approved. You can now ${signIn}.\n`,
+      ...words.approved(username, signIn),
     });
   }
   return emails;

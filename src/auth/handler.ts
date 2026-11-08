@@ -12,8 +12,9 @@ import {
   sameSecret,
   usernameFor,
 } from "./google";
+import { localeFromAcceptLanguage } from "./locale";
 import { hashPassword, verifyPassword } from "./password";
-import { loginSchema, registerSchema } from "./schemas";
+import { loginSchema, registerSchema, updateMeSchema } from "./schemas";
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import {
   clearRefreshCookie,
@@ -23,7 +24,14 @@ import {
   refreshCookie,
 } from "./refresh-tokens";
 import { ACCESS_TOKEN_TTL_SECONDS, signAccessToken } from "./tokens";
-import { createUsersStore, InvalidRefreshTokenError, type Role, type User, UsernameTakenError } from "./users-store";
+import {
+  createUsersStore,
+  InvalidRefreshTokenError,
+  type Role,
+  type User,
+  UsernameTakenError,
+  UserNotFoundError,
+} from "./users-store";
 
 export interface AuthDeps {
   tableName: string;
@@ -50,6 +58,9 @@ type Delivery = "cookie" | "body";
 function withRefreshToken(body: Record<string, unknown>, refreshToken: string, deliverIn: Delivery) {
   return deliverIn === "body" ? json(200, { ...body, refreshToken }) : json(200, body, [refreshCookie(refreshToken)]);
 }
+
+/** What `/auth/me` shows the user of themselves. */
+const profileOf = ({ id, username, email, role, status, locale }: User) => ({ id, username, email, role, status, locale });
 
 const invalidRefreshToken = () => new ApiError(401, "invalid_refresh_token", "Log in again");
 
@@ -102,7 +113,14 @@ export function createAuthHandler(deps: AuthDeps) {
     let user =
       (await users.findByGoogleSub(identity.sub)) ??
       // The Users table's stream tells the notify Lambda, as it does for a registration.
-      (await users.createGoogleUser({ sub: identity.sub, username: usernameFor(identity), email: identity.email, now }));
+      // Their browser's language, for the welcome email; there's no form to choose one on the way in.
+      (await users.createGoogleUser({
+        sub: identity.sub,
+        username: usernameFor(identity),
+        email: identity.email,
+        locale: localeFromAcceptLanguage(event.headers["accept-language"]),
+        now,
+      }));
     if (user.status === "disabled") throw new GoogleSignInError("account_disabled");
     // From before Google sign-ins started active. Someone the admin rejected is disabled, so stops above.
     if (user.status === "pending") user = await users.setStatus(user.id, "active");
@@ -130,12 +148,13 @@ export function createAuthHandler(deps: AuthDeps) {
   return withErrors(async (event) => {
     switch (event.routeKey) {
       case "POST /api/v1/auth/register": {
-        const { username, password, email } = parseBody(event, registerSchema);
+        const { username, password, email, locale } = parseBody(event, registerSchema);
         try {
           // The Users table's stream tells the notify Lambda, which emails them that they're waiting for approval.
           const user = await users.create({
             username,
             email,
+            locale,
             passwordHash: await hashPassword(password),
             role: "customer",
             status: "pending",
@@ -206,8 +225,17 @@ export function createAuthHandler(deps: AuthDeps) {
       case "GET /api/v1/auth/me": {
         const user = await users.getById(authContext(event).userId);
         if (!user) throw new ApiError(401, "unauthorized", "Sign in first");
-        const { id, username, email, role, status } = user;
-        return json(200, { id, username, email, role, status });
+        return json(200, profileOf(user));
+      }
+      case "PATCH /api/v1/auth/me": {
+        const { userId } = authContext(event);
+        const { locale } = parseBody(event, updateMeSchema);
+        try {
+          return json(200, profileOf(await users.setLocale(userId, locale)));
+        } catch (err) {
+          if (err instanceof UserNotFoundError) throw new ApiError(401, "unauthorized", "Sign in first");
+          throw err;
+        }
       }
       default:
         throw new ApiError(404, "route_not_found", `No route for ${event.routeKey}`);

@@ -13,6 +13,7 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../db-client";
+import type { Locale } from "./schemas";
 
 const MAX_FAILED_LOGINS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
@@ -28,7 +29,13 @@ export interface User {
   role: Role;
   status: UserStatus;
   createdAt: string;
+  /** The language the customer chose, or their browser's when they signed up; none means English. */
+  locale?: Locale;
 }
+
+/** The user from a profile item, without its password hash, lockout or other bookkeeping. */
+const toUser = ({ id, username, email, role, status, createdAt, locale }: Record<string, any>): User => // eslint-disable-line @typescript-eslint/no-explicit-any
+  ({ id, username, email, role, status, createdAt, locale });
 
 export class UsernameTakenError extends Error {}
 export class UserNotFoundError extends Error {}
@@ -82,6 +89,7 @@ export function createUsersStore(tableName: string) {
     async create(input: {
       username: string;
       email?: string;
+      locale?: Locale;
       passwordHash: string;
       role: Role;
       status: UserStatus;
@@ -94,6 +102,7 @@ export function createUsersStore(tableName: string) {
         role: input.role,
         status: input.status,
         createdAt: input.now.toISOString(),
+        locale: input.locale,
       };
       try {
         await ddb.send(
@@ -135,7 +144,13 @@ export function createUsersStore(tableName: string) {
      * have two users. If a second sign-in got there first, returns that user. Throws UsernameTakenError if the
      * username belongs to someone else.
      */
-    async createGoogleUser(input: { sub: string; username: string; email: string; now: Date }): Promise<User> {
+    async createGoogleUser(input: {
+      sub: string;
+      username: string;
+      email: string;
+      locale?: Locale;
+      now: Date;
+    }): Promise<User> {
       const user: User = {
         id: randomUUID(),
         username: input.username,
@@ -143,6 +158,7 @@ export function createUsersStore(tableName: string) {
         role: "customer",
         status: "active",
         createdAt: input.now.toISOString(),
+        locale: input.locale,
       };
       try {
         await ddb.send(
@@ -180,9 +196,9 @@ export function createUsersStore(tableName: string) {
         new GetCommand({ TableName: tableName, Key: profileKey(claim.userId as string), ConsistentRead: true }),
       );
       if (!Item) return undefined;
-      const { id, email, role, status, createdAt, passwordHash, failedLogins = 0, lockedUntil } = Item;
+      const { passwordHash, failedLogins = 0, lockedUntil } = Item;
       return {
-        user: { id, username: Item.username, email, role, status, createdAt },
+        user: toUser(Item),
         passwordHash,
         failedLogins,
         lockedUntil,
@@ -232,9 +248,7 @@ export function createUsersStore(tableName: string) {
             ExclusiveStartKey: startKey,
           }),
         );
-        for (const { id, username, email, role, status, createdAt } of page.Items ?? []) {
-          users.push({ id, username, email, role, status, createdAt });
-        }
+        users.push(...(page.Items ?? []).map(toUser));
         startKey = page.LastEvaluatedKey;
       } while (startKey);
       return users.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -244,9 +258,7 @@ export function createUsersStore(tableName: string) {
       const { Item } = await ddb.send(
         new GetCommand({ TableName: tableName, Key: profileKey(userId), ConsistentRead: true }),
       );
-      if (!Item) return undefined;
-      const { id, username, email, role, status, createdAt } = Item;
-      return { id, username, email, role, status, createdAt };
+      return Item && toUser(Item);
     },
 
     /** False for a disabled or deleted user, whose access token may not have expired yet. */
@@ -292,8 +304,29 @@ export function createUsersStore(tableName: string) {
             ReturnValues: "ALL_NEW",
           }),
         );
-        const { id, username, email, role, createdAt } = Attributes!;
-        return { id, username, email, role, status, createdAt };
+        return toUser(Attributes!);
+      } catch (err) {
+        if (err instanceof Error && err.name === "ConditionalCheckFailedException") throw new UserNotFoundError();
+        throw err;
+      }
+    },
+
+    /** Saves the customer's language; `null` removes it. Throws UserNotFoundError rather than create a profile. */
+    async setLocale(userId: string, locale: Locale | null): Promise<User> {
+      try {
+        const { Attributes } = await ddb.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: profileKey(userId),
+            ConditionExpression: "attribute_exists(pk)",
+            ExpressionAttributeNames: { "#locale": "locale" },
+            ...(locale
+              ? { UpdateExpression: "SET #locale = :locale", ExpressionAttributeValues: { ":locale": locale } }
+              : { UpdateExpression: "REMOVE #locale" }),
+            ReturnValues: "ALL_NEW",
+          }),
+        );
+        return toUser(Attributes!);
       } catch (err) {
         if (err instanceof Error && err.name === "ConditionalCheckFailedException") throw new UserNotFoundError();
         throw err;

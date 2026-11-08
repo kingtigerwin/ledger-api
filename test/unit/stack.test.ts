@@ -190,10 +190,12 @@ describe("LedgerStack", () => {
   });
 
   it("protects /auth/me and leaves the sign-in routes public", () => {
-    template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
-      RouteKey: "GET /api/v1/auth/me",
-      AuthorizationType: "CUSTOM",
-    });
+    for (const method of ["GET", "PATCH"]) {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
+        RouteKey: `${method} /api/v1/auth/me`,
+        AuthorizationType: "CUSTOM",
+      });
+    }
     for (const route of ["register", "login", "refresh", "logout"]) {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
         RouteKey: `POST /api/v1/auth/${route}`,
