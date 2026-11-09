@@ -39,6 +39,7 @@ export const operations: Operation[] = [
   { method: "post", path: "/api/v1/admin/users/{id}/disable", operationId: "adminDisableUser", summary: "Admin: block a user and end their refresh tokens" },
   { method: "delete", path: "/api/v1/admin/users/{id}", operationId: "adminDeleteUser", summary: "Admin: delete a customer and all their transactions, for good" },
   { method: "get", path: "/api/v1/admin/users/{id}/transactions", operationId: "adminListTransactions", summary: "Admin: a customer's transactions", query: listQuerySchema },
+  { method: "get", path: "/api/v1/admin/users/{id}/transactions/{transactionId}", operationId: "adminGetTransaction", summary: "Admin: one of a customer's transactions, with its receipt lines" },
   { method: "patch", path: "/api/v1/admin/users/{id}/transactions/{transactionId}", operationId: "adminUpdateTransaction", summary: "Admin: edit a customer's transaction; send the version you last read", body: updateTransactionSchema },
   { method: "delete", path: "/api/v1/admin/users/{id}/transactions/{transactionId}", operationId: "adminDeleteTransaction", summary: "Admin: delete a customer's transaction" },
   { method: "get", path: "/api/v1/admin/transactions", operationId: "adminListAllTransactions", summary: "Admin: every customer's transactions, newest first, each with its owner's userId", query: listQuerySchema },

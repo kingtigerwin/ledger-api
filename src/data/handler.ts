@@ -90,6 +90,10 @@ export function createDataHandler(deps: DataDeps) {
         requireAdmin(event, "admin:read");
         return json(200, await ledger.listAll(parseQuery(event, listQuerySchema)));
       }
+      case "GET /api/v1/admin/users/{id}/transactions/{transactionId}": {
+        requireAdmin(event, "admin:read");
+        return json(200, await ledger.get(event.pathParameters?.id ?? "", event.pathParameters?.transactionId ?? ""));
+      }
       case "PATCH /api/v1/admin/users/{id}/transactions/{transactionId}": {
         requireAdmin(event, "admin:write");
         return update(event.pathParameters?.id ?? "", event.pathParameters?.transactionId ?? "", event);

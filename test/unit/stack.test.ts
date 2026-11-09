@@ -153,6 +153,7 @@ describe("LedgerStack", () => {
       "POST /api/v1/insights/{id}/dismiss",
       "GET /api/v1/admin/users/{id}/transactions",
       "GET /api/v1/admin/transactions",
+      "GET /api/v1/admin/users/{id}/transactions/{transactionId}",
       "PATCH /api/v1/admin/users/{id}/transactions/{transactionId}",
       "DELETE /api/v1/admin/users/{id}/transactions/{transactionId}",
     ]) {

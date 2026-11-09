@@ -214,7 +214,7 @@ export class LedgerStack extends Stack {
       ["/api/v1/insights", [HttpMethod.GET]],
       ["/api/v1/insights/{id}/dismiss", [HttpMethod.POST]],
       ["/api/v1/admin/users/{id}/transactions", [HttpMethod.GET]],
-      ["/api/v1/admin/users/{id}/transactions/{transactionId}", [HttpMethod.PATCH, HttpMethod.DELETE]],
+      ["/api/v1/admin/users/{id}/transactions/{transactionId}", [HttpMethod.GET, HttpMethod.PATCH, HttpMethod.DELETE]],
       ["/api/v1/admin/transactions", [HttpMethod.GET]],
     ];
     for (const [routePath, methods] of dataRoutes) {
