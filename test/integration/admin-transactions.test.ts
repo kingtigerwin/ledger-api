@@ -44,6 +44,11 @@ const getOwn = (auth: AuthContext, id: string) =>
   call(handler, "GET /api/v1/transactions/{id}", undefined, { auth, params: { id } });
 const listAll = (query: Record<string, string> = {}, auth: AuthContext = ADMIN) =>
   call(handler, "GET /api/v1/admin/transactions", undefined, { auth, query });
+const adminGet = (userId: string, transactionId: string, auth: AuthContext = ADMIN) =>
+  call(handler, "GET /api/v1/admin/users/{id}/transactions/{transactionId}", undefined, {
+    auth,
+    params: { id: userId, transactionId },
+  });
 const adminPatch = (userId: string, transactionId: string, body: unknown, auth: AuthContext = ADMIN) =>
   call(handler, "PATCH /api/v1/admin/users/{id}/transactions/{transactionId}", body, {
     auth,
@@ -120,6 +125,48 @@ describe("GET /admin/transactions", () => {
   describe("given a customer", () => {
     it("refuses with 403", async () => {
       const res = await listAll({}, customer("snoop"));
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe("forbidden");
+    });
+  });
+});
+
+describe("GET /admin/users/{id}/transactions/{transactionId}", () => {
+  describe("given another customer's transaction from a scanned receipt", () => {
+    it("returns it with the receipt's lines, which lists leave out for Claude", async () => {
+      const lines = [
+        { name: "CLS CHKN DRUMSTICKS", product: "Chicken drumsticks", amountCents: 899 },
+        { name: "BANANAS", amountCents: 301 },
+      ];
+      const body = expense({ amountCents: 1200, receipt: { totalCents: 1200, lines } });
+      await create(customer("view-alice"), body);
+
+      const res = await adminGet("view-alice", body.id);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id: body.id, amountCents: 1200, version: 1, receipt: { lines } });
+    });
+  });
+
+  describe("given the wrong owner for the transaction", () => {
+    it("returns 404", async () => {
+      const body = expense();
+      await create(customer("view-bob"), body);
+
+      const res = await adminGet("view-carol", body.id);
+
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe("transaction_not_found");
+    });
+  });
+
+  describe("given a customer", () => {
+    it("refuses with 403, even for their own transaction", async () => {
+      const body = expense();
+      await create(customer("view-dave"), body);
+
+      const res = await adminGet("view-dave", body.id, customer("view-dave"));
 
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe("forbidden");
