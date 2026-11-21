@@ -47,3 +47,17 @@ The Lambdas were in Python for a while (tag `python-final`) and came back to Typ
 - Every API route must also be listed in `src/openapi.ts`; `test/unit/openapi.test.ts` fails if the spec and the stack's routes differ. Request schemas live in their own modules (`src/auth/schemas.ts`, `src/data/transaction-schema.ts`, `src/admin/schemas.ts`) so the spec can import them without pulling in handlers.
 - The smoke test's steps are in `scripts/smoke-run.ts`; `test/integration/smoke.test.ts` runs them against every handler in process, so change them there first.
 - Log through `src/log.ts`, which redacts passwords, tokens, cookies, email addresses and Authorization headers. The failed-login alarm counts `{ event: "login_failed" }` lines from the auth Lambda.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in this repo's GitHub Issues (`gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default label names: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root, both created later when needed. See `docs/agents/domain.md`.
